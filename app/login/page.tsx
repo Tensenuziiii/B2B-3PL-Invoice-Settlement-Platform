@@ -2,6 +2,8 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiClient, ApiError } from "@/lib/api/client";
+import type { LoginResponse, Role } from "@/lib/api/types";
 import {
   Activity,
   Banknote,
@@ -16,7 +18,6 @@ import {
   Eye,
   EyeOff,
   ShieldCheck,
-  CheckCircle2,
   ArrowRight,
   MapPin,
   Route,
@@ -30,58 +31,52 @@ const DEMO_ACCOUNTS = [
   { role: "Client AP Portal", email: "ap.payments@metro-wholesale.in" },
 ];
 
+function redirectByRole(role: Role): string {
+  const map: Record<Role, string> = {
+    ADMIN: "/admin",
+    DISPATCH_MANAGER: "/dispatch",
+    DRIVER: "/driver",
+    AUDITOR: "/audit",
+    ACCOUNTS: "/accounts",
+    CLIENT_AP: "/client-portal",
+    VENDOR_3PL: "/vendor-portal",
+  };
+  return map[role] ?? "/";
+}
+
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("name@vectologistics.in");
-  const [password, setPassword] = useState("password");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    if (!email || !password) {
-      setErrorMessage("Please enter both email address and password.");
-      return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiClient.post<LoginResponse>("/auth/login", { email, password });
+      document.cookie = `vecto_access_token=${res.accessToken}; path=/; max-age=900; SameSite=Lax`;
+      const dest = res.user.redirectPath?.trim() || redirectByRole(res.user.role);
+      router.push(dest);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 429) setError("Too many attempts. Try again in 15 minutes.");
+        else if (err.status === 401) setError("Invalid email or password.");
+        else setError(err.message || "Login failed.");
+      } else {
+        setError("Network error. Please try again.");
+      }
+    } finally {
+      setLoading(false);
     }
-
-    setIsLoading(true);
-    setTimeout(() => {
-      if (password === "error" || email === "locked@test.com") {
-        setIsLoading(false);
-        setErrorMessage("Account temporarily locked after 5 failed attempts. Please contact IT Security.");
-        return;
-      }
-
-      if (password.length < 6) {
-        setIsLoading(false);
-        setErrorMessage("Invalid credentials. The password entered does not match our records.");
-        return;
-      }
-
-      document.cookie = "vecto_access_token=vecto_mock_jwt_session_token_2026; path=/; max-age=86400; SameSite=Lax";
-      setSuccessMessage("Authentication verified. Redirecting to workspace...");
-
-      const normalizedEmail = email.toLowerCase();
-      let destination = "/dispatch";
-      if (normalizedEmail.includes("driver")) destination = "/driver";
-      else if (normalizedEmail.includes("audit")) destination = "/audit";
-      else if (normalizedEmail.includes("billing") || normalizedEmail.includes("account")) destination = "/accounts";
-      else if (normalizedEmail.includes("metro") || normalizedEmail.includes("client") || normalizedEmail.includes("ap.")) destination = "/client-portal";
-      else if (normalizedEmail.includes("admin")) destination = "/admin";
-
-      setTimeout(() => router.push(destination), 500);
-    }, 850);
   };
 
   const handleSelectPreset = (presetEmail: string) => {
     setEmail(presetEmail);
-    setPassword("Enterprise@2026");
-    setErrorMessage(null);
+    setError(null);
   };
 
   return (
@@ -186,6 +181,7 @@ export default function LoginPage() {
                   id="corporate-email"
                   name="email"
                   autoComplete="username"
+                  placeholder="name@vectologistics.in"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="login-field-input"
@@ -205,6 +201,7 @@ export default function LoginPage() {
                   name="password"
                   autoComplete="current-password"
                   type={showPassword ? "text" : "password"}
+                  placeholder="••••••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="login-field-input"
@@ -215,20 +212,14 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {errorMessage && (
+            {error && (
               <div className="login-message login-message-error" role="alert">
-                <AlertCircle className="h-4 w-4 shrink-0" /><span>{errorMessage}</span>
+                <AlertCircle className="h-4 w-4 shrink-0" /><span>{error}</span>
               </div>
             )}
 
-            {successMessage && (
-              <div className="login-message login-message-success" role="status">
-                <CheckCircle2 className="h-4 w-4 shrink-0" /><span>{successMessage}</span>
-              </div>
-            )}
-
-            <button type="submit" disabled={isLoading} className="login-submit">
-              {isLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Signing In...</> : <>Sign In <ArrowRight className="h-4 w-4" /></>}
+            <button type="submit" disabled={loading} className="login-submit">
+              {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Signing In...</> : <>Sign In <ArrowRight className="h-4 w-4" /></>}
             </button>
           </form>
 

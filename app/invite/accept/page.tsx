@@ -3,6 +3,7 @@
 import React, { useState, useMemo, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { apiClient, ApiError } from "@/lib/api/client";
 import {
   Lock,
   CheckCircle2,
@@ -67,7 +68,7 @@ const PASSWORD_RULES: PasswordRule[] = [
 function InviteAcceptForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const token = searchParams?.get("token") || "inv_tok_9921_demo";
+  const token = searchParams.get("token");
 
   // Form State
   const [newPassword, setNewPassword] = useState("");
@@ -76,8 +77,8 @@ function InviteAcceptForm() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Status & Submission States
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Dynamic Rule Validation Results
   const ruleResults = useMemo(() => {
@@ -111,21 +112,34 @@ function InviteAcceptForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isFormValid) return;
+    if (!token) {
+      setError("Missing invitation token.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+    if (!allRulesMet) {
+      setError("Password does not meet policy.");
+      return;
+    }
 
-    setIsSubmitting(true);
+    setLoading(true);
+    setError(null);
 
-    // Simulated API call latency
-    setTimeout(() => {
-      setIsSubmitting(false);
-      setSuccessMessage(
-        "Your password has been securely registered! Redirecting you to sign in..."
-      );
-
-      setTimeout(() => {
-        router.push("/login");
-      }, 1200);
-    }, 900);
+    try {
+      await apiClient.post("/auth/accept-invite", { token, password: newPassword });
+      router.push("/login");
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message || "Could not accept invitation.");
+      } else {
+        setError("Network error. Please try again.");
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -145,20 +159,20 @@ function InviteAcceptForm() {
 
         <div className="mt-2.5 inline-flex items-center justify-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-slate-100 text-[10px] font-mono text-slate-600 font-medium border border-slate-200">
           <KeyRound className="h-3 w-3 text-blue-800" />
-          <span>Invite Token: {token.slice(0, 14)}...</span>
+          <span>Invite Token: {token ? `${token.slice(0, 14)}...` : "None"}</span>
         </div>
       </CardHeader>
 
       <CardContent className="p-6 pt-5 space-y-4">
-        {/* Success Alert */}
-        {successMessage && (
-          <Alert className="border-emerald-200 bg-emerald-50 text-emerald-900 animate-in fade-in-50 duration-150">
-            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-            <AlertTitle className="text-xs font-bold text-emerald-900">
-              Account Activated
+        {/* Error Alert */}
+        {error && (
+          <Alert variant="destructive" className="animate-in fade-in-50 duration-150">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle className="text-xs font-bold">
+              Invitation Error
             </AlertTitle>
-            <AlertDescription className="text-xs text-emerald-800">
-              {successMessage}
+            <AlertDescription className="text-xs">
+              {error}
             </AlertDescription>
           </Alert>
         )}
@@ -177,7 +191,7 @@ function InviteAcceptForm() {
                 placeholder="Enter enterprise password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                disabled={isSubmitting}
+                disabled={loading}
                 required
                 className="pl-9 pr-9 h-10 text-xs text-slate-900 placeholder:text-slate-400 border-slate-200 bg-white focus-visible:ring-1 focus-visible:ring-slate-950 font-mono"
               />
@@ -284,7 +298,7 @@ function InviteAcceptForm() {
                 placeholder="Re-enter password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                disabled={isSubmitting}
+                disabled={loading}
                 required
                 className={`pl-9 pr-9 h-10 text-xs text-slate-900 placeholder:text-slate-400 border-slate-200 bg-white focus-visible:ring-1 focus-visible:ring-slate-950 font-mono ${
                   confirmPassword.length > 0 && !passwordsMatch
@@ -306,10 +320,10 @@ function InviteAcceptForm() {
           {/* Action Button: Disabled until policy & confirm password match */}
           <Button
             type="submit"
-            disabled={!isFormValid || isSubmitting}
+            disabled={!isFormValid || loading}
             className="w-full h-10 text-xs font-semibold bg-blue-800 hover:bg-blue-900 text-white rounded-md shadow-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
           >
-            {isSubmitting ? (
+            {loading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin text-white" />
                 <span>Saving Password...</span>
@@ -338,7 +352,7 @@ function InviteAcceptForm() {
       <CardFooter className="px-6 py-3 bg-slate-50 border-t border-slate-100 text-center flex flex-col justify-center items-center text-[11px] text-slate-500">
         <p className="flex items-center gap-1">
           <ShieldCheck className="h-3.5 w-3.5 text-blue-800" />
-          Encrypted via bcrypt-cost-12 hashing standards.
+          Encrypted using Argon2id hashing.
         </p>
         <p className="font-mono text-[10px] text-slate-400 mt-0.5">
           Single-use cryptographic invitation link.
