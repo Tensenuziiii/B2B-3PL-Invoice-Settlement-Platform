@@ -2,19 +2,19 @@
 ----------------------------------------------------------------------
 == FRONTEND VERIFICATION REPORT
 ----------------------------------------------------------------------
-Generated : 2026-10-04 10:03:02
+Generated : 2026-10-04 20:36:53
 Directory : C:\Users\himan\OneDrive\Desktop\B2B-3PL-Invoice-Settlement-Platform
 
 
 ----------------------------------------------------------------------
 == 1. REQUIRED FILES PRESENCE
 ----------------------------------------------------------------------
-  [MISSING] lib\api\client.ts
-  [MISSING] lib\api\refresh.ts
-  [MISSING] lib\api\types.ts
+  [FOUND  ] lib\api\client.ts
+  [FOUND  ] lib\api\refresh.ts
+  [FOUND  ] lib\api\types.ts
   [MISSING] lib\api\index.ts
-  [MISSING] mocks\handlers.ts
-  [MISSING] mocks\browser.ts
+  [FOUND  ] mocks\handlers.ts
+  [FOUND  ] mocks\browser.ts
   [FOUND  ] middleware.ts
   [FOUND  ] app\layout.tsx
   [FOUND  ] app\page.tsx
@@ -26,151 +26,313 @@ Directory : C:\Users\himan\OneDrive\Desktop\B2B-3PL-Invoice-Settlement-Platform
   [FOUND  ] app\accounts\page.tsx
   [FOUND  ] app\client-portal\page.tsx
   [FOUND  ] app\admin\page.tsx
-  [MISSING] app\admin\users\page.tsx
-  [MISSING] app\admin\vehicles\page.tsx
-  [MISSING] app\admin\clients\page.tsx
-  [MISSING] app\admin\vendors\page.tsx
-  [MISSING] app\admin\routes\page.tsx
-  [MISSING] app\admin\rate-cards\page.tsx
-  [MISSING] app\vendor-portal\page.tsx
+  [FOUND  ] app\admin\users\page.tsx
+  [FOUND  ] app\admin\vehicles\page.tsx
+  [FOUND  ] app\admin\clients\page.tsx
+  [FOUND  ] app\admin\vendors\page.tsx
+  [FOUND  ] app\admin\routes\page.tsx
+  [FOUND  ] app\admin\rate-cards\page.tsx
+  [FOUND  ] app\vendor-portal\page.tsx
 
 ----------------------------------------------------------------------
 == 2. MIDDLEWARE.TS CONTENT
 ----------------------------------------------------------------------
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { jwtVerify } from "jose";
 
-const protectedRoutes = [
-  "/dispatch",
-  "/audit",
-  "/accounts",
-  "/driver",
-  "/client-portal",
-  "/admin",
-];
+const secret = new TextEncoder().encode(process.env.JWT_SECRET ?? "");
 
-const appAliases: Record<string, string> = {
-  "/app": "/dispatch",
-  "/app/dispatch": "/dispatch",
-  "/app/audit": "/audit",
-  "/app/accounts": "/accounts",
-  "/app/billing": "/accounts",
-  "/app/driver": "/driver",
-  "/app/client-portal": "/client-portal",
-  "/app/admin": "/admin",
+const roleMap: Record<string, string[]> = {
+  "/dispatch": ["ADMIN", "DISPATCH_MANAGER"],
+  "/audit": ["ADMIN", "AUDITOR"],
+  "/accounts": ["ADMIN", "ACCOUNTS"],
+  "/driver": ["ADMIN", "DRIVER"],
+  "/client-portal": ["ADMIN", "CLIENT_AP"],
+  "/vendor-portal": ["ADMIN", "VENDOR_3PL"],
+  "/admin": ["ADMIN"],
 };
 
-export function middleware(request: NextRequest) {
-  const token = request.cookies.get("vecto_access_token")?.value;
-  const { pathname } = request.nextUrl;
-  const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/+$/, "") || "/";
-
-  const aliasTarget = appAliases[normalizedPath];
-
-  if (aliasTarget) {
-    if (!token) {
-      return NextResponse.redirect(new URL("/login", request.url));
-    }
-
-    return NextResponse.redirect(new URL(aliasTarget, request.url));
-  }
-
-  if (normalizedPath === "/") {
-    return NextResponse.redirect(new URL("/login", request.url));
-  }
-
-  const isProtected = protectedRoutes.some(
-    (route) => normalizedPath === route || normalizedPath.startsWith(`${route}/`)
+export async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+  const matchedPrefix = Object.keys(roleMap).find(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
+  if (!matchedPrefix) return NextResponse.next();
 
-  if (isProtected && !token) {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("from", pathname);
-    return NextResponse.redirect(loginUrl);
+  const token = req.cookies.get("vecto_access_token")?.value;
+  if (!token) return redirectToLogin(req, pathname);
+
+  try {
+    const { payload } = await jwtVerify(token, secret);
+    const role = payload.role as string;
+    const allowed = roleMap[matchedPrefix];
+    if (!allowed.includes(role)) {
+      return NextResponse.redirect(new URL("/login", req.url));
+    }
+    return NextResponse.next();
+  } catch {
+    return redirectToLogin(req, pathname);
   }
+}
 
-  return NextResponse.next();
+function redirectToLogin(req: NextRequest, from: string) {
+  const url = new URL("/login", req.url);
+  url.searchParams.set("from", from);
+  return NextResponse.redirect(url);
 }
 
 export const config = {
   matcher: [
-    "/",
-    "/login",
     "/dispatch/:path*",
     "/audit/:path*",
     "/accounts/:path*",
     "/driver/:path*",
     "/client-portal/:path*",
+    "/vendor-portal/:path*",
     "/admin/:path*",
-    "/app",
-    "/app/:path*",
   ],
 };
 
 ----------------------------------------------------------------------
 == 3. API CLIENT LAYER (lib/api/*.ts)
 ----------------------------------------------------------------------
-  lib\api\ directory empty or missing
+
+>>> FILE: C:\Users\himan\OneDrive\Desktop\B2B-3PL-Invoice-Settlement-Platform\lib\api\client.ts
+    Lines: 75
+    import { tryRefresh } from "./refresh";
+    import type { ApiErrorShape } from "./types";
+    
+    export class ApiError extends Error {
+      constructor(
+        public status: number,
+        public code: string,
+        message: string,
+      ) {
+        super(message);
+        this.name = "ApiError";
+      }
+    }
+    
+    export function readCookie(name: string): string | undefined {
+      if (typeof document === "undefined") return undefined;
+      const prefix = `${name}=`;
+      const cookies = document.cookie.split("; ");
+      for (const cookie of cookies) {
+        if (cookie.startsWith(prefix)) {
+          return decodeURIComponent(cookie.slice(prefix.length));
+        }
+      }
+      return undefined;
+    }
+    
+    export async function apiFetch<T>(
+      path: string,
+      init: RequestInit = {},
+      retry = true,
+    ): Promise<T> {
+      const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api/v1";
+      const token = readCookie("vecto_access_token");
+      const res = await fetch(`${BASE}${path}`, {
+        ...init,
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(init.headers ?? {}),
+        },
+      });
+    
+      if (res.status === 401 && retry) {
+        const ok = await tryRefresh();
+        if (ok) return apiFetch<T>(path, init, false);
+        if (typeof window !== "undefined") window.location.href = "/login";
+        throw new ApiError(401, "UNAUTHORIZED", "Session expired");
+      }
+    
+      if (!res.ok) {
+        let body: ApiErrorShape | null = null;
+        try {
+          body = (await res.json()) as ApiErrorShape;
+        } catch {
+          /* ignore */
+        }
+        throw new ApiError(
+          res.status,
+          body?.error?.code ?? "UNKNOWN",
+
+>>> FILE: C:\Users\himan\OneDrive\Desktop\B2B-3PL-Invoice-Settlement-Platform\lib\api\refresh.ts
+    Lines: 25
+    import type { RefreshResponse } from "./types";
+    
+    let refreshPromise: Promise<boolean> | null = null;
+    
+    export function tryRefresh(): Promise<boolean> {
+      if (refreshPromise) return refreshPromise;
+      refreshPromise = doRefresh().finally(() => {
+        refreshPromise = null;
+      });
+      return refreshPromise;
+    }
+    
+    export async function doRefresh(): Promise<boolean> {
+      if (typeof document === "undefined") return false; // SSR-safe
+      const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api/v1";
+      try {
+        const res = await fetch(`${BASE}/auth/refresh`, {
+          method: "POST",
+          credentials: "include",
+        });
+        if (!res.ok) return false;
+        const { accessToken } = (await res.json()) as RefreshResponse;
+        document.cookie = `vecto_access_token=${accessToken}; path=/; max-age=900; SameSite=Lax`;
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+>>> FILE: C:\Users\himan\OneDrive\Desktop\B2B-3PL-Invoice-Settlement-Platform\lib\api\types.ts
+    Lines: 51
+    export type Role =
+      | "ADMIN"
+      | "DISPATCH_MANAGER"
+      | "DRIVER"
+      | "AUDITOR"
+      | "ACCOUNTS"
+      | "CLIENT_AP"
+      | "VENDOR_3PL";
+    
+    export type ApiErrorShape = {
+      error: {
+        code: string;
+        message: string;
+      };
+    };
+    
+    export type LoginRequest = {
+      email: string;
+      password: string;
+    };
+    
+    export type LoginResponse = {
+      accessToken: string;
+      user: {
+        id: string;
+        email: string;
+        name: string;
+        role: Role;
+        displayId: string;
+        redirectPath: string;
+      };
+    };
+    
+    export type RefreshResponse = {
+      accessToken: string;
+    };
+    
+    export type Paginated<T> = {
+      data: T[];
+      meta: {
+        total: number;
+        limit: number;
+        offset: number;
+      };
+    };
+    
+    // TODO: expand when backend ships
+    export type Trip = Record<string, unknown>;
+    export type Invoice = Record<string, unknown>;
+    export type User = Record<string, unknown>;
+    export type Vehicle = Record<string, unknown>;
+    export type Driver = Record<string, unknown>;
+    export type Client = Record<string, unknown>;
+    export type Vendor = Record<string, unknown>;
+    export type Route = Record<string, unknown>;
+    export type RateCard = Record<string, unknown>;
+    export type Settlement = Record<string, unknown>;
 
 ----------------------------------------------------------------------
 == 4. MSW SETUP
 ----------------------------------------------------------------------
-  mocks\ directory missing
-  package.json msw: NOT PRESENT
+>>> FILE: C:\Users\himan\OneDrive\Desktop\B2B-3PL-Invoice-Settlement-Platform\mocks\browser.ts
+    import { setupWorker } from "msw/browser";
+    import { handlers } from "./handlers";
+    
+    export const worker = setupWorker(...handlers);
+
+>>> FILE: C:\Users\himan\OneDrive\Desktop\B2B-3PL-Invoice-Settlement-Platform\mocks\handlers.ts
+    import { http, HttpResponse } from "msw";
+    
+    interface MockUser {
+      id: string;
+      email: string;
+      name: string;
+      role: string;
+      displayId: string;
+      redirectPath: string;
+    }
+    
+    const USERS_BY_EMAIL: Record<string, MockUser> = {
+      "admin@vecto.dev": {
+        id: "u1",
+        email: "admin@vecto.dev",
+        name: "Admin User",
+        role: "ADMIN",
+        displayId: "ADM-01",
+        redirectPath: "/admin",
+      },
+      "dispatch@vecto.dev": {
+        id: "u2",
+        email: "dispatch@vecto.dev",
+        name: "Dispatch Lead",
+        role: "DISPATCH_MANAGER",
+        displayId: "DSP-01",
+        redirectPath: "/dispatch",
+      },
+      "driver@vecto.dev": {
+        id: "u3",
+
+  package.json msw: ^3.0.2
 
 ----------------------------------------------------------------------
 == 5. MOCK DATA STILL IN PAGE FILES
 ----------------------------------------------------------------------
   Searching: INITIAL_ / simulated / TRIP-8842 / VEC-INV- / MH 12 RN
 
-  \app\accounts\page.tsx:111  id: "TRIP-8842",
-  \app\accounts\page.tsx:189  invoiceNo: "VEC-INV-2026-1001",
-  \app\accounts\page.tsx:200  invoiceNo: "VEC-INV-2026-0988",
-  \app\accounts\page.tsx:211  invoiceNo: "VEC-INV-2026-0940",
-  \app\accounts\page.tsx:222  invoiceNo: "VEC-INV-2026-0925",
-  \app\accounts\page.tsx:251  const [selectedTripIds, setSelectedTripIds] = useState<string[]>(["TRIP-8842", "TRIP-8848"]);
-  \app\accounts\page.tsx:331  const generatedInvoiceNumber = `VEC-INV-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-  \app\admin\page.tsx:108  const INITIAL_USERS: MasterUser[] = [
-  \app\admin\page.tsx:183  const INITIAL_VEHICLES: MasterVehicle[] = [
-  \app\admin\page.tsx:185  regNo: "MH 12 RN 4920",
-  \app\admin\page.tsx:218  const INITIAL_DRIVERS: MasterDriver[] = [
-  \app\admin\page.tsx:224  assignedTruck: "MH 12 RN 4920",
-  \app\admin\page.tsx:251  const [users, setUsers] = useState<MasterUser[]>(INITIAL_USERS);
-  \app\admin\page.tsx:367  { name: "Vehicles", icon: Truck, tab: "vehicles", badge: `${INITIAL_VEHICLES.length}` },
-  \app\admin\page.tsx:368  { name: "Drivers", icon: UserCheck, tab: "drivers", badge: `${INITIAL_DRIVERS.length}` },
-  \app\admin\page.tsx:697  {INITIAL_VEHICLES.map((v) => (
-  \app\admin\page.tsx:751  {INITIAL_DRIVERS.map((d) => (
-  \app\audit\page.tsx:107  id: "TRIP-8842",
-  \app\audit\page.tsx:144  regNo: "MH 12 RN 4920",
-  \app\audit\page.tsx:274  const [selectedTripId, setSelectedTripId] = useState<string>("TRIP-8842");
-  \app\audit\page.tsx:910  {/* Simulated Physical Lorry Receipt Header */}
-  \app\audit\page.tsx:1055  {/* Digital Signature Simulated Box */}
-  \app\client-portal\page.tsx:91  const INITIAL_INVOICES: ClientInvoice[] = [
-  \app\client-portal\page.tsx:102  id: "TRIP-8842",
-  \app\client-portal\page.tsx:213  const [invoices, setInvoices] = useState<ClientInvoice[]>(INITIAL_INVOICES);
-  \app\dispatch\page.tsx:41  { id: "TRIP-8842", vehicle: "KA 01 AJ 3319", driver: "Manjunath S.", initials: "MS", origin: "Hosur DC", destination: "Whitefield, Bengaluru", eta: "14:20", status: "In transit", cod: 24500 },
-  \app\dispatch\page.tsx:42  { id: "TRIP-8841", vehicle: "MH 12 RN 4920", driver: "Rajesh Kumar", initials: "RK", origin: "Bhiwandi Hub", destination: "Sanand Industrial Park", eta: "15:05", status: "Delayed", cod: 48500 },
-  \app\driver\page.tsx:178  MH 12 RN 4920
-  \app\driver\page.tsx:316  {/* Simulated GPS Routing HUD */}
-  \app\driver\page.tsx:336  {/* Simulated Map Visual Box */}
-  \app\invite\accept\page.tsx:118  // Simulated API call latency
+  \app\admin\vehicles\page.tsx:306  placeholder="e.g. MH 12 RN 4920"
   \backend\src\dispatch\dispatch.service.spec.ts:219  vehicle: { regNo: 'MH 12 RN 4920' },
   \backend\src\dispatch\dispatch.service.spec.ts:246  regNo: 'MH 12 RN 4920',
   \backend\src\driver\driver.service.spec.ts:48  vehicle: { regNo: 'MH 12 RN 4920' },
   \backend\src\driver\driver.service.spec.ts:72  vehicleRegNo: 'MH 12 RN 4920',
+  \mocks\handlers.ts:80  { id: "v1", regNo: "MH 12 RN 4920", type: "16T Eicher", active: true },
 
 ----------------------------------------------------------------------
 == 6. REAL API IMPORTS IN PAGES
 ----------------------------------------------------------------------
   Looking for: from '@/lib/api' / apiClient. / await fetch(
 
+  \app\accounts\page.tsx
+  \app\admin\clients\page.tsx
+  \app\admin\rate-cards\page.tsx
+  \app\admin\routes\page.tsx
+  \app\admin\users\page.tsx
+  \app\admin\vehicles\page.tsx
+  \app\admin\vendors\page.tsx
+  \app\audit\page.tsx
+  \app\client-portal\page.tsx
+  \app\dispatch\page.tsx
+  \app\driver\page.tsx
+  \app\invite\accept\page.tsx
+  \app\login\page.tsx
+  \app\vendor-portal\page.tsx
 
 ----------------------------------------------------------------------
 == 7. AUTH WIRING — /login
 ----------------------------------------------------------------------
-  Lines: 248
+  Lines: 245
   Contains 'demo_session_token': False
-  Contains 'apiClient|authService': False
+  Contains 'apiClient|authService': True
   Contains 'login': True
 
 ----------------------------------------------------------------------
@@ -178,7 +340,7 @@ export const config = {
 ----------------------------------------------------------------------
   demo_session_token      : False
   vecto_access_token      : True
-  JWT verify (jose/jwt)   : False
+  JWT verify (jose/jwt)   : True
   Redirects to /login     : True
   Uses matcher config     : True
 
@@ -191,6 +353,7 @@ export const config = {
     @radix-ui/react-slot                     ^1.1.0
     class-variance-authority                 ^0.7.0
     clsx                                     ^2.1.1
+    jose                                     ^6.2.12
     lucide-react                             ^0.460.0
     next                                     ^14.2.15
     react                                    ^18.3.1
@@ -202,6 +365,7 @@ export const config = {
     @types/react                             ^18
     @types/react-dom                         ^18
     autoprefixer                             ^10.4.20
+    msw                                      ^3.0.2
     postcss                                  ^8.4.47
     tailwindcss                              ^3.4.14
     typescript                               ^5
@@ -215,31 +379,78 @@ export const config = {
 ----------------------------------------------------------------------
 == 10. LINE COUNT PER ROUTE
 ----------------------------------------------------------------------
-  app\login\page.tsx                            248 lines
-  app\invite\accept\page.tsx                    336 lines
+  app\login\page.tsx                            245 lines
+  app\invite\accept\page.tsx                    351 lines
   app\page.tsx                                  14 lines
-  app\dispatch\page.tsx                         211 lines
-  app\driver\page.tsx                           647 lines
-  app\audit\page.tsx                            1339 lines
-  app\accounts\page.tsx                         1148 lines
-  app\client-portal\page.tsx                    1173 lines
-  app\admin\page.tsx                            875 lines
-  app\vendor-portal\page.tsx                    MISSING
+  app\dispatch\page.tsx                         599 lines
+  app\driver\page.tsx                           853 lines
+  app\audit\page.tsx                            1406 lines
+  app\accounts\page.tsx                         1410 lines
+  app\client-portal\page.tsx                    1291 lines
+  app\admin\page.tsx                            4 lines
+  app\vendor-portal\page.tsx                    589 lines
 
 ----------------------------------------------------------------------
 == 11. ADMIN SUB-ROUTES
 ----------------------------------------------------------------------
-  app\admin\users\page.tsx                      MISSING
-  app\admin\vehicles\page.tsx                   MISSING
-  app\admin\clients\page.tsx                    MISSING
-  app\admin\vendors\page.tsx                    MISSING
-  app\admin\routes\page.tsx                     MISSING
-  app\admin\rate-cards\page.tsx                 MISSING
+  app\admin\users\page.tsx                      FOUND
+  app\admin\vehicles\page.tsx                   FOUND
+  app\admin\clients\page.tsx                    FOUND
+  app\admin\vendors\page.tsx                    FOUND
+  app\admin\routes\page.tsx                     FOUND
+  app\admin\rate-cards\page.tsx                 FOUND
 
 ----------------------------------------------------------------------
 == 12. TSC + BUILD
 ----------------------------------------------------------------------
-  node_modules not found. Run 'npm install' first.
+  Running: npx tsc --noEmit
+
+  tsc exit code: 0
+    (clean — no errors)
+
+  Running: npm run build
+
+  build exit code: 0
+       Creating an optimized production build ...
+     Ô£ô Compiled successfully
+       Linting and checking validity of types ...
+       Collecting page data ...
+       Generating static pages (0/19) ...
+       Generating static pages (4/19) 
+       Generating static pages (9/19) 
+       Generating static pages (14/19) 
+     Ô£ô Generating static pages (19/19)
+       Finalizing page optimization ...
+       Collecting build traces ...
+    
+    Route (app)                              Size     First Load JS
+    Ôöî Ôùï /                                    456 B          87.9 kB
+    Ôö£ Ôùï /_not-found                          873 B          88.3 kB
+    Ôö£ Ôùï /accounts                            11.5 kB         132 kB
+    Ôö£ Ôùï /admin                               136 B          87.5 kB
+    Ôö£ Ôùï /admin/clients                       2.66 kB         114 kB
+    Ôö£ Ôùï /admin/rate-cards                    2.72 kB         114 kB
+    Ôö£ Ôùï /admin/routes                        2.75 kB         114 kB
+    Ôö£ Ôùï /admin/users                         2.73 kB         114 kB
+    Ôö£ Ôùï /admin/vehicles                      2.69 kB         114 kB
+    Ôö£ Ôùï /admin/vendors                       2.52 kB         114 kB
+    Ôö£ Ôùï /audit                               11.3 kB         132 kB
+    Ôö£ Ôùï /client-portal                       9.63 kB         130 kB
+    Ôö£ Ôùï /dispatch                            9.36 kB         106 kB
+    Ôö£ Ôùï /driver                              10.1 kB         127 kB
+    Ôö£ Ôùï /invite/accept                       5.68 kB         111 kB
+    Ôö£ Ôùï /login                               5.5 kB         92.9 kB
+    Ôöö Ôùï /vendor-portal                       7.63 kB         125 kB
+    + First Load JS shared by all            87.4 kB
+      Ôö£ chunks/117-e77b2022e6f593bd.js       31.7 kB
+      Ôö£ chunks/fd9d1056-6730a8cfe82d9fce.js  53.6 kB
+      Ôöö other shared chunks (total)          2.03 kB
+    
+    
+    ãÆ Middleware                             31.7 kB
+    
+    Ôùï  (Static)  prerendered as static content
+    
 
 ----------------------------------------------------------------------
 == END OF REPORT
