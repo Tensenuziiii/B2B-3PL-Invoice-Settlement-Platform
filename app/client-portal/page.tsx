@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import {
   Inbox,
@@ -58,159 +58,35 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 
-// Types
-interface InvoiceLineTrip {
+import { apiClient, ApiError } from "@/lib/api/client";
+import type { Invoice, Paginated } from "@/lib/api/types";
+
+interface DisputeMessage {
   id: string;
-  lrNumber: string;
-  route: string;
-  cargo: string;
-  deliveryDate: string;
-  freightAmount: number;
-  tollAmount: number;
-  demurrageAmount: number;
-  totalAmount: number;
-  isDisputed: boolean;
-  disputeReason?: string;
-  disputeAmount?: number;
-  disputeComments?: string;
-  signatory: string;
-  dockStamp: string;
+  author: string;
+  body: string;
+  createdAt: string;
 }
 
-interface ClientInvoice {
-  invoiceNo: string;
-  vendorName: string;
-  vendorGstin: string;
-  issueDate: string;
-  dueDate: string;
-  grossAmount: number;
-  status: "Pending Approval" | "Partially Disputed" | "Approved" | "Paid";
-  lineItems: InvoiceLineTrip[];
+interface DisputeThread {
+  id: string;
+  status: string;
+  messages: DisputeMessage[];
 }
-
-const INITIAL_INVOICES: ClientInvoice[] = [
-  {
-    invoiceNo: "INV-2026-9921",
-    vendorName: "Vecto Logistics India Pvt Ltd",
-    vendorGstin: "27AABCV1234F1Z5",
-    issueDate: "02-Oct-2026",
-    dueDate: "01-Nov-2026 (Net 30)",
-    grossAmount: 94105,
-    status: "Pending Approval",
-    lineItems: [
-      {
-        id: "TRIP-8842",
-        lrNumber: "LR-BLR-8842",
-        route: "Hosur DC (TN) → Whitefield DC (KA)",
-        cargo: "12 Pallets FMCG Groceries",
-        deliveryDate: "02-Oct-2026",
-        freightAmount: 24500,
-        tollAmount: 850,
-        demurrageAmount: 1200,
-        totalAmount: 26550,
-        isDisputed: false,
-        signatory: "K. Ramesh (Warehouse In-Charge)",
-        dockStamp: "STAMPED: Gate Bay #4 Received",
-      },
-      {
-        id: "TRIP-8848",
-        lrNumber: "LR-GUJ-5521",
-        route: "Hazira Port (GJ) → Pithampur Hub (MP)",
-        cargo: "Chemical Drums (Non-Hazardous)",
-        deliveryDate: "30-Sep-2026",
-        freightAmount: 49500,
-        tollAmount: 2200,
-        demurrageAmount: 1500,
-        totalAmount: 53200,
-        isDisputed: false,
-        signatory: "D. Chauhan (Materials Inward)",
-        dockStamp: "STAMPED: Gate Bay #1 Received",
-      },
-    ],
-  },
-  {
-    invoiceNo: "INV-2026-8802",
-    vendorName: "Vecto Logistics India Pvt Ltd",
-    vendorGstin: "27AABCV1234F1Z5",
-    issueDate: "25-Sep-2026",
-    dueDate: "25-Oct-2026 (Net 30)",
-    grossAmount: 124300,
-    status: "Partially Disputed",
-    lineItems: [
-      {
-        id: "TRIP-8810",
-        lrNumber: "LR-MUM-4011",
-        route: "Bhiwandi Hub → Pune DC",
-        cargo: "Beverages & Dairy Pallets",
-        deliveryDate: "24-Sep-2026",
-        freightAmount: 32000,
-        tollAmount: 1400,
-        demurrageAmount: 2100,
-        totalAmount: 35500,
-        isDisputed: true,
-        disputeReason: "Damaged Goods",
-        disputeAmount: 4500,
-        disputeComments: "2 pallets arrived with wet cartons; salvage credit deduction.",
-        signatory: "M. Joshi (Quality Inspector)",
-        dockStamp: "STAMPED: Conditional Delivery",
-      },
-      {
-        id: "TRIP-8812",
-        lrNumber: "LR-MUM-4015",
-        route: "Panvel Yard → Sanand Plant",
-        cargo: "Packaging Consumables",
-        deliveryDate: "24-Sep-2026",
-        freightAmount: 58000,
-        tollAmount: 2800,
-        demurrageAmount: 0,
-        totalAmount: 60800,
-        isDisputed: false,
-        signatory: "A. Patel (Store Manager)",
-        dockStamp: "STAMPED: Full Clean Delivery",
-      },
-    ],
-  },
-  {
-    invoiceNo: "INV-2026-7730",
-    vendorName: "Vecto Logistics India Pvt Ltd",
-    vendorGstin: "27AABCV1234F1Z5",
-    issueDate: "15-Sep-2026",
-    dueDate: "15-Oct-2026",
-    grossAmount: 168400,
-    status: "Approved",
-    lineItems: [
-      {
-        id: "TRIP-8760",
-        lrNumber: "LR-DEL-3301",
-        route: "Kundli DC → Okhla Hub",
-        cargo: "Dry Grocery Pallets",
-        deliveryDate: "14-Sep-2026",
-        freightAmount: 28000,
-        tollAmount: 1200,
-        demurrageAmount: 0,
-        totalAmount: 29200,
-        isDisputed: false,
-        signatory: "V. Sharma",
-        dockStamp: "STAMPED: Verified",
-      },
-    ],
-  },
-  {
-    invoiceNo: "INV-2026-6612",
-    vendorName: "Vecto Logistics India Pvt Ltd",
-    vendorGstin: "27AABCV1234F1Z5",
-    issueDate: "20-Aug-2026",
-    dueDate: "20-Sep-2026",
-    grossAmount: 215000,
-    status: "Paid",
-    lineItems: [],
-  },
-];
 
 export default function ClientAccountsPayablePortal() {
   const [activeMenu, setActiveMenu] = useState("Invoice Inbox");
   const [searchQuery, setSearchQuery] = useState("");
-  const [invoices, setInvoices] = useState<ClientInvoice[]>(INITIAL_INVOICES);
+
+  // API State
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
+  const [invoiceItems, setInvoiceItems] = useState<Array<Record<string, unknown>>>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  // Settings State
   const [apContactEmail, setApContactEmail] = useState("ap.payments@metro-wholesale.in");
   const [notificationPreferences, setNotificationPreferences] = useState({
     invoices: true,
@@ -219,185 +95,317 @@ export default function ClientAccountsPayablePortal() {
   });
   const [settingsSaved, setSettingsSaved] = useState(false);
 
-  // Deep-Dive Modal State
-  const [selectedInvoice, setSelectedInvoice] = useState<ClientInvoice | null>(null);
+  // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [approving, setApproving] = useState(false);
 
   // Line-Item Inline Dispute State
   const [activeDisputeTripId, setActiveDisputeTripId] = useState<string | null>(null);
   const [disputeReason, setDisputeReason] = useState("Damaged Goods");
   const [disputeAmountInput, setDisputeAmountInput] = useState("3500");
-  const [disputeComments, setDisputeComments] = useState("Carton seals breached upon unloading at Bay #4; 3 cases damaged.");
+  const [disputeComments, setDisputeComments] = useState("Carton seals breached upon unloading; goods damaged.");
+  const [disputing, setDisputing] = useState(false);
 
-  // POD Viewer Popover State
-  const [viewingPodTrip, setViewingPodTrip] = useState<InvoiceLineTrip | null>(null);
+  // Dispute Thread State
+  const [activeDisputeThread, setActiveDisputeThread] = useState<DisputeThread | null>(null);
+  const [newMessageBody, setNewMessageBody] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+
+  // Fetch Invoices on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiClient.get<Paginated<Invoice>>("/invoices");
+        if (!cancelled) {
+          setInvoices(res.data);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof ApiError ? err.message : "Failed to load invoices");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Fetch invoice items when selectedInvoiceId changes
+  useEffect(() => {
+    if (!selectedInvoiceId) {
+      setInvoiceItems([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiClient.get<{ data: Array<Record<string, unknown>> }>(`/invoices/${selectedInvoiceId}/items`);
+        if (!cancelled) {
+          setInvoiceItems(Array.isArray(res.data) ? res.data : []);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setInvoiceItems([]);
+          setError(err instanceof ApiError ? err.message : "Failed to load invoice items");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedInvoiceId]);
+
+  // Selected Invoice Object
+  const selectedInvoice = useMemo(() => {
+    if (!selectedInvoiceId) return null;
+    return invoices.find((inv) => String(inv.id ?? inv.invoiceNumber ?? inv.invoiceNo) === selectedInvoiceId) ?? null;
+  }, [invoices, selectedInvoiceId]);
+
+  // Computed Financial Metrics
+  const outstandingStatuses = useMemo(() => new Set([
+    "PENDING_APPROVAL",
+    "PARTIALLY_DISPUTED",
+    "APPROVED",
+    "OVERDUE",
+    "DISPUTED",
+    "UNDER_REVIEW",
+    "AUDIT_CLEARED",
+  ]), []);
+
+  const totalOutstanding = useMemo(() => {
+    return invoices.reduce((sum, inv) => {
+      const status = String(inv.status ?? "").trim().toUpperCase().replace(/\s+/g, "_");
+      if (outstandingStatuses.has(status)) {
+        const amt = Number(inv.total ?? inv.grossAmount ?? inv.totalAmount ?? 0);
+        return sum + amt;
+      }
+      return sum;
+    }, 0);
+  }, [invoices, outstandingStatuses]);
+
+  const dueThisWeek = useMemo(() => {
+    const now = new Date();
+    const next7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    let hasValidDueDate = false;
+    let sum = 0;
+
+    for (const inv of invoices) {
+      const rawDate = inv.dueDate ?? inv.due_date;
+      if (rawDate && typeof rawDate === "string") {
+        const d = new Date(rawDate);
+        if (!isNaN(d.getTime())) {
+          hasValidDueDate = true;
+          if (d >= now && d <= next7Days) {
+            sum += Number(inv.total ?? inv.grossAmount ?? inv.totalAmount ?? 0);
+          }
+        }
+      }
+    }
+
+    return hasValidDueDate ? `₹${sum.toLocaleString("en-IN")}` : "—";
+  }, [invoices]);
 
   // Filtered Invoices
   const filteredInvoices = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     return invoices.filter((inv) => {
-      const q = searchQuery.toLowerCase();
+      if (!q) return true;
+      const invNo = String(inv.invoiceNumber ?? inv.invoiceNo ?? inv.id ?? "");
+      const vendor = String(inv.vendorName ?? inv.vendor ?? "");
+      const status = String(inv.status ?? "");
       return (
-        inv.invoiceNo.toLowerCase().includes(q) ||
-        inv.vendorName.toLowerCase().includes(q) ||
-        inv.status.toLowerCase().includes(q)
+        invNo.toLowerCase().includes(q) ||
+        vendor.toLowerCase().includes(q) ||
+        status.toLowerCase().includes(q)
       );
     });
   }, [invoices, searchQuery]);
 
-  const matchesSearch = (values: string[]) => {
-    const query = searchQuery.trim().toLowerCase();
-    return !query || values.some((value) => value.toLowerCase().includes(query));
-  };
-  const paidInvoices = invoices.filter(
-    (invoice) => invoice.status === "Paid" && matchesSearch([invoice.invoiceNo, invoice.vendorName]),
-  );
-  const disputedLines = invoices.flatMap((invoice) =>
-    invoice.lineItems
-      .filter((item) => item.isDisputed)
-      .map((item) => ({ invoice, item })),
-  );
-  const filteredDisputedLines = disputedLines.filter(({ invoice, item }) =>
-    matchesSearch([
-      invoice.invoiceNo,
-      item.id,
-      item.lrNumber,
-      item.disputeReason || "",
-      item.disputeComments || "",
-    ]),
-  );
-  const activeDisputeCount = disputedLines.length;
-  const pendingInvoiceCount = invoices.filter(
-    (invoice) => invoice.status === "Pending Approval" || invoice.status === "Partially Disputed",
-  ).length;
-
-  // Open Deep-Dive Modal
-  const handleOpenInvoiceModal = (inv: ClientInvoice, disputeTripId?: string) => {
-    const invoiceCopy = JSON.parse(JSON.stringify(inv)) as ClientInvoice;
-    setSelectedInvoice(invoiceCopy);
-    setActiveDisputeTripId(disputeTripId ?? null);
-    setViewingPodTrip(null);
-    if (disputeTripId) {
-      const disputedTrip = invoiceCopy.lineItems.find((item) => item.id === disputeTripId);
-      if (disputedTrip) {
-        setDisputeReason(disputedTrip.disputeReason || "Damaged Goods");
-        setDisputeAmountInput(disputedTrip.disputeAmount?.toString() || "3500");
-        setDisputeComments(disputedTrip.disputeComments || "");
-      }
-    }
-    setIsModalOpen(true);
-  };
-
-  // Toggle Inline Dispute on a specific trip
-  const handleToggleDisputeRow = (tripId: string) => {
-    if (activeDisputeTripId === tripId) {
-      setActiveDisputeTripId(null);
-    } else {
-      setActiveDisputeTripId(tripId);
-      const trip = selectedInvoice?.lineItems.find((t) => t.id === tripId);
-      if (trip && trip.isDisputed) {
-        setDisputeReason(trip.disputeReason || "Damaged Goods");
-        setDisputeAmountInput(trip.disputeAmount?.toString() || "3500");
-        setDisputeComments(trip.disputeComments || "");
-      } else {
-        setDisputeReason("Damaged Goods");
-        setDisputeAmountInput("3500");
-        setDisputeComments("Carton seals breached upon unloading at Bay #4; 3 cases damaged.");
-      }
-    }
-  };
-
-  // Save Inline Dispute
-  const handleSaveDispute = (tripId: string) => {
-    if (!selectedInvoice) return;
-
-    const amt = parseFloat(disputeAmountInput) || 0;
-    const updatedLineItems = selectedInvoice.lineItems.map((item) => {
-      if (item.id === tripId) {
-        return {
-          ...item,
-          isDisputed: true,
-          disputeReason,
-          disputeAmount: amt,
-          disputeComments,
-        };
-      }
-      return item;
+  const paidInvoices = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return invoices.filter((inv) => {
+      const isPaid = String(inv.status ?? "").toUpperCase() === "PAID";
+      if (!isPaid) return false;
+      if (!q) return true;
+      const invNo = String(inv.invoiceNumber ?? inv.invoiceNo ?? inv.id ?? "");
+      const vendor = String(inv.vendorName ?? inv.vendor ?? "");
+      return invNo.toLowerCase().includes(q) || vendor.toLowerCase().includes(q);
     });
+  }, [invoices, searchQuery]);
 
-    const updatedInvoice: ClientInvoice = {
-      ...selectedInvoice,
-      status: "Partially Disputed",
-      lineItems: updatedLineItems,
-    };
-
-    setSelectedInvoice(updatedInvoice);
-    setActiveDisputeTripId(null);
-
-    // Update parent list
-    setInvoices((prev) =>
-      prev.map((inv) => (inv.invoiceNo === updatedInvoice.invoiceNo ? updatedInvoice : inv))
-    );
-  };
-
-  // Remove Dispute on a trip
-  const handleRemoveDispute = (tripId: string) => {
-    if (!selectedInvoice) return;
-
-    const updatedLineItems = selectedInvoice.lineItems.map((item) => {
-      if (item.id === tripId) {
-        const { disputeReason, disputeAmount, disputeComments, ...rest } = item;
-        return { ...rest, isDisputed: false };
-      }
-      return item;
+  const disputedInvoices = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return invoices.filter((inv) => {
+      const status = String(inv.status ?? "").toUpperCase();
+      const isDisputed = status.includes("DISPUT");
+      if (!isDisputed) return false;
+      if (!q) return true;
+      const invNo = String(inv.invoiceNumber ?? inv.invoiceNo ?? inv.id ?? "");
+      const vendor = String(inv.vendorName ?? inv.vendor ?? "");
+      return invNo.toLowerCase().includes(q) || vendor.toLowerCase().includes(q);
     });
+  }, [invoices, searchQuery]);
 
-    const anyStillDisputed = updatedLineItems.some((t) => t.isDisputed);
-    const updatedInvoice: ClientInvoice = {
-      ...selectedInvoice,
-      status: anyStillDisputed ? "Partially Disputed" : "Pending Approval",
-      lineItems: updatedLineItems,
-    };
-
-    setSelectedInvoice(updatedInvoice);
-    setActiveDisputeTripId(null);
-
-    setInvoices((prev) =>
-      prev.map((inv) => (inv.invoiceNo === updatedInvoice.invoiceNo ? updatedInvoice : inv))
-    );
-  };
+  const pendingInvoiceCount = useMemo(() => {
+    return invoices.filter((inv) => {
+      const s = String(inv.status ?? "").toUpperCase();
+      return s.includes("PENDING") || s.includes("DISPUT");
+    }).length;
+  }, [invoices]);
 
   // Calculations for Selected Modal
   const totalDeductions = useMemo(() => {
-    if (!selectedInvoice) return 0;
-    return selectedInvoice.lineItems.reduce(
-      (sum, item) => (item.isDisputed ? sum + (item.disputeAmount || 0) : sum),
-      0
-    );
+    return invoiceItems.reduce((sum, item) => {
+      const isDisputed = Boolean(item.isDisputed || item.disputeId || item.dispute_id);
+      return isDisputed ? sum + Number(item.disputeAmount ?? item.amount ?? 0) : sum;
+    }, 0);
+  }, [invoiceItems]);
+
+  const selectedGrossAmount = useMemo(() => {
+    return Number(selectedInvoice?.total ?? selectedInvoice?.grossAmount ?? selectedInvoice?.totalAmount ?? 0);
   }, [selectedInvoice]);
 
   const netPayableAuthorized = useMemo(() => {
-    if (!selectedInvoice) return 0;
-    return Math.max(selectedInvoice.grossAmount - totalDeductions, 0);
-  }, [selectedInvoice, totalDeductions]);
+    return Math.max(selectedGrossAmount - totalDeductions, 0);
+  }, [selectedGrossAmount, totalDeductions]);
+
+  // Open Deep-Dive Modal
+  const handleOpenInvoiceModal = (inv: Invoice, disputeTripId?: string) => {
+    const invId = String(inv.id ?? inv.invoiceNumber ?? inv.invoiceNo ?? "");
+    setSelectedInvoiceId(invId);
+    setActiveDisputeTripId(disputeTripId ?? null);
+    setActiveDisputeThread(null);
+    setIsModalOpen(true);
+  };
+
+  // View POD
+  const handleViewPod = async (podId: string) => {
+    try {
+      const { url } = await apiClient.get<{ url: string }>(`/pods/${podId}/download-url`);
+      if (url) {
+        window.open(url, "_blank");
+      } else {
+        setNotice({ type: "error", message: "Proof of Delivery (POD) download link unavailable." });
+      }
+    } catch (err) {
+      setNotice({
+        type: "error",
+        message: err instanceof ApiError ? err.message : "Failed to retrieve POD download URL",
+      });
+    }
+  };
+
+  // Fetch Dispute Thread
+  const fetchDisputeThread = async (disputeId: string) => {
+    try {
+      const thread = await apiClient.get<DisputeThread>(`/disputes/${disputeId}`);
+      setActiveDisputeThread(thread);
+    } catch (err) {
+      setNotice({
+        type: "error",
+        message: err instanceof ApiError ? err.message : "Failed to load dispute thread",
+      });
+    }
+  };
+
+  // Send message in Dispute Thread
+  const handleSendMessage = async (disputeId: string) => {
+    if (!newMessageBody.trim()) return;
+    setSendingMessage(true);
+    try {
+      await apiClient.post(`/disputes/${disputeId}/messages`, {
+        body: newMessageBody.trim(),
+      });
+      setNewMessageBody("");
+      const thread = await apiClient.get<DisputeThread>(`/disputes/${disputeId}`);
+      setActiveDisputeThread(thread);
+      setNotice({ type: "success", message: "Message sent to dispute thread." });
+    } catch (err) {
+      setNotice({
+        type: "error",
+        message: err instanceof ApiError ? err.message : "Failed to post message to dispute",
+      });
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  // Toggle Inline Dispute on a specific trip
+  const handleToggleDisputeRow = (tripId: string, item?: Record<string, unknown>) => {
+    if (activeDisputeTripId === tripId) {
+      setActiveDisputeTripId(null);
+      setActiveDisputeThread(null);
+    } else {
+      setActiveDisputeTripId(tripId);
+      const disputeId = String(item?.disputeId ?? item?.dispute_id ?? "");
+      if (disputeId) {
+        fetchDisputeThread(disputeId);
+      } else {
+        setActiveDisputeThread(null);
+        setDisputeReason(String(item?.disputeReason ?? "Damaged Goods"));
+        setDisputeAmountInput(String(item?.disputeAmount ?? "3500"));
+        setDisputeComments(String(item?.disputeComments ?? ""));
+      }
+    }
+  };
+
+  // Raise Dispute (per line item)
+  const handleSaveDispute = async (invoiceItemId: string) => {
+    if (!selectedInvoiceId) return;
+    setDisputing(true);
+    try {
+      await apiClient.post<{ disputeId: string; success: boolean }>(`/invoices/${selectedInvoiceId}/dispute`, {
+        invoiceItemId,
+        reasonCode: disputeReason,
+        comment: disputeComments,
+        amount: Number(disputeAmountInput) || 0,
+      });
+
+      setNotice({ type: "success", message: "Dispute submitted." });
+      setActiveDisputeTripId(null);
+
+      // refetch items and invoices
+      const [itemsRes, invRes] = await Promise.all([
+        apiClient.get<{ data: Array<Record<string, unknown>> }>(`/invoices/${selectedInvoiceId}/items`),
+        apiClient.get<Paginated<Invoice>>("/invoices"),
+      ]);
+      setInvoiceItems(Array.isArray(itemsRes.data) ? itemsRes.data : []);
+      setInvoices(invRes.data);
+    } catch (err) {
+      setNotice({
+        type: "error",
+        message: err instanceof ApiError ? err.message : "Failed to submit dispute",
+      });
+    } finally {
+      setDisputing(false);
+    }
+  };
 
   // Approve Invoice
-  const handleApproveInvoice = () => {
-    if (!selectedInvoice) return;
+  const handleApproveInvoice = async () => {
+    if (!selectedInvoiceId) return;
+    setApproving(true);
+    try {
+      await apiClient.post(`/invoices/${selectedInvoiceId}/approve`);
+      setNotice({ type: "success", message: "Invoice approved." });
+      setIsModalOpen(false);
 
-    const approvedInv: ClientInvoice = {
-      ...selectedInvoice,
-      status: "Approved",
-    };
-
-    setInvoices((prev) =>
-      prev.map((inv) => (inv.invoiceNo === approvedInv.invoiceNo ? approvedInv : inv))
-    );
-    setSelectedInvoice(approvedInv);
-    setIsModalOpen(false);
-
-    alert(
-      `✓ INVOICE APPROVED!\nInvoice ${approvedInv.invoiceNo} has been approved for ERP settlement.\nNet Payment Authorized: ₹${netPayableAuthorized.toLocaleString("en-IN")}\nDebit Note Reference: ${totalDeductions > 0 ? "DN-2026-METRO-04" : "None (Clean Approval)"}`
-    );
+      // refetch invoices list
+      const res = await apiClient.get<Paginated<Invoice>>("/invoices");
+      setInvoices(res.data);
+    } catch (err) {
+      setNotice({
+        type: "error",
+        message: err instanceof ApiError ? err.message : "Failed to approve invoice",
+      });
+    } finally {
+      setApproving(false);
+    }
   };
 
   const handleSaveVendorSettings = (event: React.FormEvent<HTMLFormElement>) => {
@@ -405,9 +413,49 @@ export default function ClientAccountsPayablePortal() {
     setSettingsSaved(true);
   };
 
+  // Status renderer (Rule 10)
+  const renderStatusBadge = (inv: Invoice) => {
+    const rawStatus = String(inv.status ?? "PENDING_APPROVAL");
+    const invId = String(inv.id ?? inv.invoiceNumber ?? inv.invoiceNo ?? "");
+    let displayStatus = rawStatus;
+
+    if (rawStatus === "DISPUTED") {
+      if (selectedInvoiceId === invId && invoiceItems.length > 0 && invoiceItems.some((item) => item.isDisputed || item.disputeId)) {
+        displayStatus = "Partially Disputed";
+      } else {
+        displayStatus = "Disputed";
+      }
+    } else if (rawStatus === "PENDING_APPROVAL") {
+      displayStatus = "Pending Approval";
+    } else if (rawStatus === "PARTIALLY_DISPUTED") {
+      displayStatus = "Partially Disputed";
+    } else if (rawStatus === "APPROVED") {
+      displayStatus = "Approved";
+    } else if (rawStatus === "PAID") {
+      displayStatus = "Paid";
+    }
+
+    const badgeClass =
+      displayStatus === "Approved"
+        ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+        : displayStatus === "Partially Disputed" || displayStatus === "Disputed"
+        ? "bg-amber-50 text-amber-800 border-amber-300"
+        : displayStatus === "Paid"
+        ? "bg-blue-50 text-blue-700 border-blue-300"
+        : displayStatus === "Overdue"
+        ? "bg-red-50 text-red-700 border-red-300"
+        : "bg-slate-100 text-slate-800 border-slate-300";
+
+    return (
+      <Badge variant="outline" className={`text-[11px] font-semibold px-2 py-0.5 rounded ${badgeClass}`}>
+        {displayStatus}
+      </Badge>
+    );
+  };
+
   return (
     <div className="flex h-screen w-full bg-slate-100 text-slate-800 font-sans antialiased overflow-hidden">
-      {/* 1. LEFT SIDEBAR (Client Portal Themed - Clean Crisp Light Slate/White) */}
+      {/* 1. LEFT SIDEBAR */}
       <aside className="w-64 flex-shrink-0 flex flex-col border-r border-slate-200 bg-white shadow-xs">
         {/* Client Brand Logo Header */}
         <div className="h-16 border-b border-slate-200 px-5 flex items-center justify-between bg-white">
@@ -448,11 +496,11 @@ export default function ClientAccountsPayablePortal() {
         <nav className="flex-1 px-3 py-4 space-y-1">
           {[
             { name: "Invoice Inbox", icon: Inbox, count: `${pendingInvoiceCount} Pending` },
-            { name: "Payment History", icon: CreditCard, count: null },
+            { name: "Payment History", icon: CreditCard, count: `${paidInvoices.length} Settled` },
             {
               name: "Active Disputes",
               icon: AlertTriangle,
-              count: activeDisputeCount ? `${activeDisputeCount} Flagged` : null,
+              count: disputedInvoices.length ? `${disputedInvoices.length} Flagged` : null,
             },
             { name: "Vendor Settings", icon: Settings, count: null },
           ].map((item) => {
@@ -491,7 +539,7 @@ export default function ClientAccountsPayablePortal() {
           })}
         </nav>
 
-        {/* Switcher to Internal Logistics Tools (For Project Review) */}
+        {/* Switcher to Internal Logistics Tools */}
         <div className="p-3 border-t border-slate-200 bg-slate-50">
           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 px-1 mb-1.5 block">
             Internal Platform Roles
@@ -556,7 +604,7 @@ export default function ClientAccountsPayablePortal() {
                   activeMenu === "Payment History"
                     ? "Search paid invoices..."
                     : activeMenu === "Active Disputes"
-                    ? "Search disputes, trips..."
+                    ? "Search disputes..."
                     : "Search Invoices, Status..."
                 }
                 disabled={activeMenu === "Vendor Settings"}
@@ -572,119 +620,185 @@ export default function ClientAccountsPayablePortal() {
               className="bg-slate-50 border-slate-200 text-slate-700 font-mono text-xs px-3 py-1 flex items-center gap-1.5"
             >
               <span className="text-slate-500 font-sans">Total Outstanding:</span>
-              <span className="font-bold text-slate-900">₹94,105</span>
+              <span className="font-bold text-slate-900">₹{totalOutstanding.toLocaleString("en-IN")}</span>
               <span className="text-slate-300">|</span>
               <span className="text-amber-600 font-sans">Due This Week:</span>
-              <span className="font-bold text-amber-700">₹31,270</span>
+              <span className="font-bold text-amber-700">{dueThisWeek}</span>
             </Badge>
           </div>
         </header>
 
-        {/* 3. MAIN CONTENT: INVOICE INBOX VIEW */}
+        {/* 3. MAIN CONTENT */}
         <main className="flex-1 overflow-y-auto p-6 space-y-4">
-          {activeMenu === "Invoice Inbox" && (
-          <Card className="shadow-none border-slate-200 bg-white">
-            <CardHeader className="p-4 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
-              <div>
-                <CardTitle className="text-sm font-bold text-slate-900">
-                  Freight Invoices Pending Approval
-                </CardTitle>
-                <CardDescription className="text-xs text-slate-500 mt-0.5">
-                  Review billed trip consignments, verify digital Proof of Delivery (POD), and authorize payments.
-                </CardDescription>
+          {/* Inline Dismissible Notification Alert */}
+          {notice && (
+            <div
+              role="status"
+              className={`p-3.5 border rounded-lg text-xs flex items-center justify-between shadow-xs animate-in fade-in-50 ${
+                notice.type === "success"
+                  ? "bg-emerald-50 border-emerald-300 text-emerald-900"
+                  : "bg-red-50 border-red-300 text-red-900"
+              }`}
+            >
+              <div className="flex items-center space-x-2">
+                {notice.type === "success" ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+                ) : (
+                  <AlertTriangle className="h-4 w-4 text-red-600 flex-shrink-0" />
+                )}
+                <span className="font-medium">{notice.message}</span>
               </div>
-              <Badge variant="outline" className="font-mono text-xs">
-                Billing Cycle: Net 30
-              </Badge>
-            </CardHeader>
-
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader className="bg-slate-50/75">
-                  <TableRow className="border-b border-slate-200">
-                    <TableHead className="text-xs font-semibold text-slate-600 py-3 w-[160px]">
-                      Invoice Number
-                    </TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-600 py-3 w-[130px]">
-                      Invoice Date
-                    </TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-600 py-3 w-[150px]">
-                      Due Date
-                    </TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-600 py-3 text-right w-[150px]">
-                      Total Amount (₹)
-                    </TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-600 py-3 text-center w-[160px]">
-                      Status
-                    </TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-600 py-3 text-right w-[140px]">
-                      Action
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredInvoices.map((inv) => (
-                    <TableRow key={inv.invoiceNo} className="border-b border-slate-200 text-xs hover:bg-slate-50/70 transition-colors">
-                      {/* Invoice No */}
-                      <TableCell className="py-3 font-mono font-bold text-slate-900">
-                        {inv.invoiceNo}
-                        <span className="text-[10px] text-slate-500 block font-sans">
-                          {inv.vendorName}
-                        </span>
-                      </TableCell>
-
-                      {/* Date */}
-                      <TableCell className="py-3 font-mono text-slate-700">
-                        {inv.issueDate}
-                      </TableCell>
-
-                      {/* Due Date */}
-                      <TableCell className="py-3 font-mono text-slate-700">
-                        {inv.dueDate}
-                      </TableCell>
-
-                      {/* Total Amount */}
-                      <TableCell className="py-3 text-right font-mono font-bold text-slate-900 text-sm">
-                        ₹{inv.grossAmount.toLocaleString("en-IN")}
-                      </TableCell>
-
-                      {/* Status Badge */}
-                      <TableCell className="py-3 text-center">
-                        <Badge
-                          variant="outline"
-                          className={`text-[11px] font-semibold px-2 py-0.5 rounded ${
-                            inv.status === "Approved"
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-300"
-                              : inv.status === "Partially Disputed"
-                              ? "bg-amber-50 text-amber-800 border-amber-300"
-                              : inv.status === "Paid"
-                              ? "bg-blue-50 text-blue-700 border-blue-300"
-                              : "bg-slate-100 text-slate-800 border-slate-300"
-                          }`}
-                        >
-                          {inv.status}
-                        </Badge>
-                      </TableCell>
-
-                      {/* Action Button */}
-                      <TableCell className="py-3 text-right">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleOpenInvoiceModal(inv)}
-                          className="h-7 text-xs border-slate-300 text-slate-900 bg-white hover:bg-slate-100 font-semibold"
-                        >
-                          View & Approve
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+              <button
+                type="button"
+                onClick={() => setNotice(null)}
+                className={`font-bold underline ${
+                  notice.type === "success"
+                    ? "text-emerald-700 hover:text-emerald-900"
+                    : "text-red-700 hover:text-red-900"
+                }`}
+              >
+                Dismiss
+              </button>
+            </div>
           )}
 
+          {/* Error Banner */}
+          {error && (
+            <div
+              role="alert"
+              className="p-3.5 bg-red-50 border border-red-300 rounded-lg text-red-900 text-xs flex items-center justify-between shadow-xs animate-in fade-in-50"
+            >
+              <div className="flex items-center space-x-2">
+                <AlertTriangle className="h-4 w-4 text-red-600 flex-shrink-0" />
+                <span className="font-medium">{error}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                className="text-red-700 hover:text-red-900 font-bold underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* INVOICE INBOX VIEW */}
+          {activeMenu === "Invoice Inbox" && (
+            <Card className="shadow-none border-slate-200 bg-white">
+              <CardHeader className="p-4 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
+                <div>
+                  <CardTitle className="text-sm font-bold text-slate-900">
+                    Freight Invoices Pending Approval
+                  </CardTitle>
+                  <CardDescription className="text-xs text-slate-500 mt-0.5">
+                    Review billed trip consignments, verify digital Proof of Delivery (POD), and authorize payments.
+                  </CardDescription>
+                </div>
+                <Badge variant="outline" className="font-mono text-xs">
+                  Billing Cycle: Net 30
+                </Badge>
+              </CardHeader>
+
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader className="bg-slate-50/75">
+                    <TableRow className="border-b border-slate-200">
+                      <TableHead className="text-xs font-semibold text-slate-600 py-3 w-[160px]">
+                        Invoice Number
+                      </TableHead>
+                      <TableHead className="text-xs font-semibold text-slate-600 py-3 w-[130px]">
+                        Invoice Date
+                      </TableHead>
+                      <TableHead className="text-xs font-semibold text-slate-600 py-3 w-[150px]">
+                        Due Date
+                      </TableHead>
+                      <TableHead className="text-xs font-semibold text-slate-600 py-3 text-right w-[150px]">
+                        Total Amount (₹)
+                      </TableHead>
+                      <TableHead className="text-xs font-semibold text-slate-600 py-3 text-center w-[160px]">
+                        Status
+                      </TableHead>
+                      <TableHead className="text-xs font-semibold text-slate-600 py-3 text-right w-[140px]">
+                        Action
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {loading ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="py-12 text-center text-xs text-slate-500">
+                          <div className="flex flex-col items-center justify-center space-y-2">
+                            <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+                            <span>Loading invoices...</span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : filteredInvoices.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="py-12 text-center text-xs text-slate-500">
+                          No invoices found.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredInvoices.map((inv) => {
+                        const invNo = String(inv.invoiceNumber ?? inv.invoiceNo ?? inv.id ?? "—");
+                        const vendor = String(inv.vendorName ?? inv.vendor ?? "—");
+                        const issueDate = String(inv.issueDate ?? inv.createdAt ?? inv.date ?? "—");
+                        const dueDate = String(inv.dueDate ?? "—");
+                        const total = Number(inv.total ?? inv.grossAmount ?? inv.totalAmount ?? 0);
+
+                        return (
+                          <TableRow key={invNo} className="border-b border-slate-200 text-xs hover:bg-slate-50/70 transition-colors">
+                            {/* Invoice No */}
+                            <TableCell className="py-3 font-mono font-bold text-slate-900">
+                              {invNo}
+                              <span className="text-[10px] text-slate-500 block font-sans">
+                                {vendor}
+                              </span>
+                            </TableCell>
+
+                            {/* Date */}
+                            <TableCell className="py-3 font-mono text-slate-700">
+                              {issueDate}
+                            </TableCell>
+
+                            {/* Due Date */}
+                            <TableCell className="py-3 font-mono text-slate-700">
+                              {dueDate}
+                            </TableCell>
+
+                            {/* Total Amount */}
+                            <TableCell className="py-3 text-right font-mono font-bold text-slate-900 text-sm">
+                              ₹{total.toLocaleString("en-IN")}
+                            </TableCell>
+
+                            {/* Status Badge */}
+                            <TableCell className="py-3 text-center">
+                              {renderStatusBadge(inv)}
+                            </TableCell>
+
+                            {/* Action Button */}
+                            <TableCell className="py-3 text-right">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleOpenInvoiceModal(inv)}
+                                className="h-7 text-xs border-slate-300 text-slate-900 bg-white hover:bg-slate-100 font-semibold"
+                              >
+                                View & Approve
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* PAYMENT HISTORY VIEW */}
           {activeMenu === "Payment History" && (
             <Card className="shadow-none border-slate-200 bg-white">
               <CardHeader className="p-4 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
@@ -711,19 +825,26 @@ export default function ClientAccountsPayablePortal() {
                   </TableHeader>
                   <TableBody>
                     {paidInvoices.length ? (
-                      paidInvoices.map((invoice) => (
-                        <TableRow key={invoice.invoiceNo} className="border-b border-slate-200 text-xs">
-                          <TableCell className="py-3 font-mono font-bold text-slate-900">{invoice.invoiceNo}</TableCell>
-                          <TableCell className="py-3 text-slate-700">{invoice.vendorName}</TableCell>
-                          <TableCell className="py-3 font-mono text-slate-700">{invoice.issueDate}</TableCell>
-                          <TableCell className="py-3 text-right font-mono font-bold text-slate-900">
-                            ₹{invoice.grossAmount.toLocaleString("en-IN")}
-                          </TableCell>
-                          <TableCell className="py-3 text-center">
-                            <Badge className="border border-emerald-300 bg-emerald-50 text-emerald-700">Paid</Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))
+                      paidInvoices.map((invoice) => {
+                        const invNo = String(invoice.invoiceNumber ?? invoice.invoiceNo ?? invoice.id ?? "—");
+                        const vendor = String(invoice.vendorName ?? invoice.vendor ?? "—");
+                        const issueDate = String(invoice.issueDate ?? invoice.createdAt ?? invoice.date ?? "—");
+                        const total = Number(invoice.total ?? invoice.grossAmount ?? invoice.totalAmount ?? 0);
+
+                        return (
+                          <TableRow key={invNo} className="border-b border-slate-200 text-xs">
+                            <TableCell className="py-3 font-mono font-bold text-slate-900">{invNo}</TableCell>
+                            <TableCell className="py-3 text-slate-700">{vendor}</TableCell>
+                            <TableCell className="py-3 font-mono text-slate-700">{issueDate}</TableCell>
+                            <TableCell className="py-3 text-right font-mono font-bold text-slate-900">
+                              ₹{total.toLocaleString("en-IN")}
+                            </TableCell>
+                            <TableCell className="py-3 text-center">
+                              <Badge className="border border-emerald-300 bg-emerald-50 text-emerald-700">Paid</Badge>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
                     ) : (
                       <TableRow>
                         <TableCell colSpan={5} className="py-10 text-center text-sm text-slate-500">
@@ -737,58 +858,61 @@ export default function ClientAccountsPayablePortal() {
             </Card>
           )}
 
+          {/* ACTIVE DISPUTES VIEW */}
           {activeMenu === "Active Disputes" && (
             <Card className="shadow-none border-slate-200 bg-white">
               <CardHeader className="p-4 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
                 <div>
                   <CardTitle className="text-sm font-bold text-slate-900">Active Disputes</CardTitle>
                   <CardDescription className="text-xs text-slate-500 mt-0.5">
-                    Review disputed trip lines and their requested deductions.
+                    Review disputed invoices and flagged line items.
                   </CardDescription>
                 </div>
                 <Badge variant="outline" className="font-mono text-xs">
-                  {activeDisputeCount} Flagged
+                  {disputedInvoices.length} Flagged
                 </Badge>
               </CardHeader>
               <CardContent className="p-0">
                 <Table>
                   <TableHeader className="bg-slate-50/75">
                     <TableRow className="border-b border-slate-200">
-                      <TableHead className="py-3 text-xs font-semibold text-slate-600">Trip / LR</TableHead>
                       <TableHead className="py-3 text-xs font-semibold text-slate-600">Invoice</TableHead>
-                      <TableHead className="py-3 text-xs font-semibold text-slate-600">Reason</TableHead>
-                      <TableHead className="py-3 text-right text-xs font-semibold text-slate-600">Deduction (₹)</TableHead>
+                      <TableHead className="py-3 text-xs font-semibold text-slate-600">Vendor</TableHead>
+                      <TableHead className="py-3 text-xs font-semibold text-slate-600">Status</TableHead>
+                      <TableHead className="py-3 text-right text-xs font-semibold text-slate-600">Total (₹)</TableHead>
                       <TableHead className="py-3 text-right text-xs font-semibold text-slate-600">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredDisputedLines.length ? (
-                      filteredDisputedLines.map(({ invoice, item }) => (
-                        <TableRow key={`${invoice.invoiceNo}-${item.id}`} className="border-b border-slate-200 text-xs">
-                          <TableCell className="py-3 font-mono font-bold text-slate-900">
-                            {item.id}<span className="block text-[10px] font-normal text-slate-500">{item.lrNumber}</span>
-                          </TableCell>
-                          <TableCell className="py-3 font-mono text-slate-700">{invoice.invoiceNo}</TableCell>
-                          <TableCell className="py-3 text-slate-700">
-                            <span className="font-semibold">{item.disputeReason || "Unspecified"}</span>
-                            {item.disputeComments && <span className="mt-1 block text-[11px] text-slate-500">{item.disputeComments}</span>}
-                          </TableCell>
-                          <TableCell className="py-3 text-right font-mono font-bold text-red-600">
-                            ₹{(item.disputeAmount || 0).toLocaleString("en-IN")}
-                          </TableCell>
-                          <TableCell className="py-3 text-right">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleOpenInvoiceModal(invoice, item.id)}
-                              className="h-7 text-xs border-slate-300"
-                            >
-                              Review
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))
+                    {disputedInvoices.length ? (
+                      disputedInvoices.map((inv) => {
+                        const invNo = String(inv.invoiceNumber ?? inv.invoiceNo ?? inv.id ?? "—");
+                        const vendor = String(inv.vendorName ?? inv.vendor ?? "—");
+                        const status = String(inv.status ?? "DISPUTED");
+                        const total = Number(inv.total ?? inv.grossAmount ?? inv.totalAmount ?? 0);
+
+                        return (
+                          <TableRow key={invNo} className="border-b border-slate-200 text-xs">
+                            <TableCell className="py-3 font-mono font-bold text-slate-900">{invNo}</TableCell>
+                            <TableCell className="py-3 text-slate-700">{vendor}</TableCell>
+                            <TableCell className="py-3">{renderStatusBadge(inv)}</TableCell>
+                            <TableCell className="py-3 text-right font-mono font-bold text-red-600">
+                              ₹{total.toLocaleString("en-IN")}
+                            </TableCell>
+                            <TableCell className="py-3 text-right">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleOpenInvoiceModal(inv)}
+                                className="h-7 text-xs border-slate-300"
+                              >
+                                Review
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
                     ) : (
                       <TableRow>
                         <TableCell colSpan={5} className="py-10 text-center text-sm text-slate-500">
@@ -802,23 +926,28 @@ export default function ClientAccountsPayablePortal() {
             </Card>
           )}
 
+          {/* VENDOR SETTINGS VIEW */}
           {activeMenu === "Vendor Settings" && (
             <Card className="shadow-none border-slate-200 bg-white">
               <CardHeader className="p-4 border-b border-slate-200">
                 <CardTitle className="text-sm font-bold text-slate-900">Vendor Settings</CardTitle>
                 <CardDescription className="text-xs text-slate-500 mt-0.5">
-                  Review Vecto Logistics vendor details and manage AP notification preferences.
+                  Review logistics vendor details and manage AP notification preferences.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6 p-5">
                 <div className="grid gap-4 border-b border-slate-200 pb-5 sm:grid-cols-3">
                   <div>
                     <span className="block text-[10px] font-semibold uppercase text-slate-500">Vendor</span>
-                    <span className="mt-1 block text-sm font-semibold text-slate-900">Vecto Logistics India Pvt Ltd</span>
+                    <span className="mt-1 block text-sm font-semibold text-slate-900">
+                      {String(selectedInvoice?.vendorName ?? selectedInvoice?.vendor ?? "Vecto Logistics India Pvt Ltd")}
+                    </span>
                   </div>
                   <div>
                     <span className="block text-[10px] font-semibold uppercase text-slate-500">GSTIN</span>
-                    <span className="mt-1 block font-mono text-sm text-slate-800">27AABCV1234F1Z5</span>
+                    <span className="mt-1 block font-mono text-sm text-slate-800">
+                      {String(selectedInvoice?.vendorGstin ?? selectedInvoice?.gstin ?? "—")}
+                    </span>
                   </div>
                   <div>
                     <span className="block text-[10px] font-semibold uppercase text-slate-500">Payment Terms</span>
@@ -888,48 +1017,36 @@ export default function ClientAccountsPayablePortal() {
             <div>
               <div className="flex items-center space-x-2">
                 <DialogTitle className="text-base font-bold text-slate-900">
-                  Invoice {selectedInvoice?.invoiceNo} Summary
+                  Invoice {String(selectedInvoice?.invoiceNumber ?? selectedInvoice?.invoiceNo ?? selectedInvoice?.id ?? "—")} Summary
                 </DialogTitle>
-                <Badge
-                  variant="outline"
-                  className={`text-[10px] font-bold ${
-                    selectedInvoice?.status === "Approved"
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-300"
-                      : selectedInvoice?.status === "Partially Disputed"
-                      ? "bg-amber-50 text-amber-800 border-amber-300"
-                      : "bg-slate-100 text-slate-700"
-                  }`}
-                >
-                  {selectedInvoice?.status}
-                </Badge>
+                {selectedInvoice && renderStatusBadge(selectedInvoice)}
               </div>
               <DialogDescription className="text-xs text-slate-500 mt-0.5">
-                Vendor: {selectedInvoice?.vendorName} • GSTIN: {selectedInvoice?.vendorGstin}
+                Vendor: {String(selectedInvoice?.vendorName ?? selectedInvoice?.vendor ?? "—")} • GSTIN: {String(selectedInvoice?.vendorGstin ?? selectedInvoice?.gstin ?? "—")}
               </DialogDescription>
             </div>
 
             <div className="text-right">
               <span className="text-[11px] text-slate-500 block">Total Invoice Value:</span>
               <span className="text-lg font-bold font-mono text-slate-900">
-                ₹{selectedInvoice?.grossAmount.toLocaleString("en-IN")}
+                ₹{selectedGrossAmount.toLocaleString("en-IN")}
               </span>
             </div>
           </DialogHeader>
 
           {/* Modal Body: Line Items & Inline Dispute */}
           <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs bg-white">
-            
             {/* Context Alert if Disputed */}
             {totalDeductions > 0 && (
               <div className="p-3 bg-amber-50 border border-amber-300 rounded-lg text-amber-900 flex items-center justify-between text-xs">
                 <div className="flex items-center space-x-2">
                   <AlertOctagon className="h-4 w-4 text-amber-600 flex-shrink-0" />
                   <span>
-                    <strong>Dispute Applied:</strong> ₹{totalDeductions.toLocaleString("en-IN")} has been flagged for debit note adjustment. Net authorized payment adjusted.
+                    <strong>Dispute Applied:</strong> ₹{totalDeductions.toLocaleString("en-IN")} has been flagged for dispute adjustment. Net authorized payment adjusted.
                   </span>
                 </div>
                 <Badge className="bg-amber-200 text-amber-900 font-mono text-[10px]">
-                  Debit Note Pending
+                  Dispute Pending
                 </Badge>
               </div>
             )}
@@ -952,229 +1069,241 @@ export default function ClientAccountsPayablePortal() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {selectedInvoice?.lineItems.map((trip) => {
-                      const isDisputeRowOpen = activeDisputeTripId === trip.id;
+                    {invoiceItems.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="py-8 text-center text-xs text-slate-500">
+                          No line items found for this invoice.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      invoiceItems.map((trip, idx) => {
+                        const tripId = String(trip.id ?? trip.tripId ?? trip.trip_id ?? `item-${idx}`);
+                        const isDisputeRowOpen = activeDisputeTripId === tripId;
+                        const lrNumber = String(trip.lrNumber ?? trip.lr_number ?? trip.lrNo ?? trip.tripNumber ?? "—");
+                        const route = String(trip.route ?? (trip.origin && trip.destination ? `${trip.origin} → ${trip.destination}` : "—"));
+                        const cargo = String(trip.cargo ?? trip.cargoType ?? "—");
+                        const deliveryDate = String(trip.deliveryDate ?? trip.delivery_date ?? trip.date ?? "—");
+                        const totalAmount = Number(trip.totalAmount ?? trip.total ?? trip.amount ?? trip.freightAmount ?? 0);
+                        const isDisputed = Boolean(trip.isDisputed || trip.disputeId || trip.dispute_id);
+                        const disputeAmount = Number(trip.disputeAmount ?? trip.dispute_amount ?? 0);
+                        const disputeId = String(trip.disputeId ?? trip.dispute_id ?? "");
+                        const podId = String(trip.podId ?? trip.pod_id ?? tripId);
 
-                      return (
-                        <React.Fragment key={trip.id}>
-                          <TableRow
-                            className={`border-b border-slate-200 text-xs transition-colors ${
-                              trip.isDisputed ? "bg-amber-50/40" : "hover:bg-slate-50/50"
-                            }`}
-                          >
-                            {/* Trip & LR */}
-                            <TableCell className="py-2.5 font-mono">
-                              <span className="font-bold text-slate-900 block">{trip.id}</span>
-                              <span className="text-[10px] text-slate-500 font-sans">{trip.lrNumber}</span>
-                            </TableCell>
+                        return (
+                          <React.Fragment key={tripId}>
+                            <TableRow
+                              className={`border-b border-slate-200 text-xs transition-colors ${
+                                isDisputed ? "bg-amber-50/40" : "hover:bg-slate-50/50"
+                              }`}
+                            >
+                              {/* Trip & LR */}
+                              <TableCell className="py-2.5 font-mono">
+                                <span className="font-bold text-slate-900 block">{tripId}</span>
+                                <span className="text-[10px] text-slate-500 font-sans">{lrNumber}</span>
+                              </TableCell>
 
-                            {/* Route & Cargo */}
-                            <TableCell className="py-2.5">
-                              <div className="font-medium text-slate-800">{trip.route}</div>
-                              <div className="text-[10px] text-slate-500">{trip.cargo}</div>
-                            </TableCell>
+                              {/* Route & Cargo */}
+                              <TableCell className="py-2.5">
+                                <div className="font-medium text-slate-800">{route}</div>
+                                <div className="text-[10px] text-slate-500">{cargo}</div>
+                              </TableCell>
 
-                            {/* Date */}
-                            <TableCell className="py-2.5 font-mono text-slate-700">
-                              {trip.deliveryDate}
-                            </TableCell>
+                              {/* Date */}
+                              <TableCell className="py-2.5 font-mono text-slate-700">
+                                {deliveryDate}
+                              </TableCell>
 
-                            {/* Line Total */}
-                            <TableCell className="py-2.5 text-right font-mono font-bold text-slate-900">
-                              ₹{trip.totalAmount.toLocaleString("en-IN")}
-                              {trip.isDisputed && (
-                                <span className="block text-[10px] text-red-600 font-normal">
-                                  - ₹{trip.disputeAmount?.toLocaleString("en-IN")} Disputed
-                                </span>
-                              )}
-                            </TableCell>
+                              {/* Line Total */}
+                              <TableCell className="py-2.5 text-right font-mono font-bold text-slate-900">
+                                ₹{totalAmount.toLocaleString("en-IN")}
+                                {isDisputed && disputeAmount > 0 && (
+                                  <span className="block text-[10px] text-red-600 font-normal">
+                                    - ₹{disputeAmount.toLocaleString("en-IN")} Disputed
+                                  </span>
+                                )}
+                              </TableCell>
 
-                            {/* 1. Small "View POD" text link */}
-                            <TableCell className="py-2.5 text-center">
-                              <button
-                                type="button"
-                                onClick={() => setViewingPodTrip(viewingPodTrip?.id === trip.id ? null : trip)}
-                                className="text-blue-600 hover:text-blue-800 underline font-semibold text-xs inline-flex items-center gap-1"
-                              >
-                                <Eye className="h-3 w-3" /> View POD
-                              </button>
-                            </TableCell>
+                              {/* View POD */}
+                              <TableCell className="py-2.5 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleViewPod(podId)}
+                                  className="text-blue-600 hover:text-blue-800 underline font-semibold text-xs inline-flex items-center gap-1"
+                                >
+                                  <Eye className="h-3 w-3" /> View POD
+                                </button>
+                              </TableCell>
 
-                            {/* 2. Small warning/flag icon button */}
-                            <TableCell className="py-2.5 text-center">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleToggleDisputeRow(trip.id)}
-                                className={`h-7 w-7 p-0 rounded-md border ${
-                                  trip.isDisputed
-                                    ? "bg-red-50 text-red-600 border-red-300 hover:bg-red-100"
-                                    : "border-slate-300 text-slate-500 hover:text-red-600 hover:border-red-300"
-                                }`}
-                                title={trip.isDisputed ? "Edit Dispute" : "Flag Dispute"}
-                              >
-                                <Flag className="h-3.5 w-3.5 fill-current" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-
-                          {/* INLINE POD VIEWER EXPANSION */}
-                          {viewingPodTrip?.id === trip.id && (
-                            <TableRow className="bg-slate-50 border-b border-slate-200">
-                              <TableCell colSpan={6} className="p-4">
-                                <div className="p-4 rounded-lg border border-slate-300 bg-white space-y-2">
-                                  <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                                    <div className="flex items-center space-x-2">
-                                      <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                                      <span className="font-bold text-xs text-slate-900">
-                                        Verified Consignee Delivery Proof: {trip.lrNumber}
-                                      </span>
-                                    </div>
-                                    <button
-                                      onClick={() => setViewingPodTrip(null)}
-                                      className="text-slate-400 hover:text-slate-700"
-                                    >
-                                      <X className="h-4 w-4" />
-                                    </button>
-                                  </div>
-
-                                  <div className="grid grid-cols-2 gap-4 text-xs pt-1">
-                                    <div className="p-2.5 bg-slate-50 rounded border border-slate-200">
-                                      <span className="text-[10px] uppercase font-bold text-slate-500 block">
-                                        Dock Seal & Stamp
-                                      </span>
-                                      <span className="font-mono text-xs text-blue-800 font-bold block mt-1">
-                                        {trip.dockStamp}
-                                      </span>
-                                      <span className="text-[10px] text-slate-500 block mt-0.5">
-                                        Verified on {trip.deliveryDate} at Dock Bay
-                                      </span>
-                                    </div>
-
-                                    <div className="p-2.5 bg-slate-50 rounded border border-slate-200">
-                                      <span className="text-[10px] uppercase font-bold text-slate-500 block">
-                                        Receiver Signatory (Glass Sign)
-                                      </span>
-                                      <span className="font-serif italic font-bold text-sm text-slate-800 block mt-1">
-                                        {trip.signatory}
-                                      </span>
-                                      <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
-                                        Auth Token: #SHA-9921-OK
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
+                              {/* Dispute Flag */}
+                              <TableCell className="py-2.5 text-center">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleToggleDisputeRow(tripId, trip)}
+                                  className={`h-7 w-7 p-0 rounded-md border ${
+                                    isDisputed
+                                      ? "bg-red-50 text-red-600 border-red-300 hover:bg-red-100"
+                                      : "border-slate-300 text-slate-500 hover:text-red-600 hover:border-red-300"
+                                  }`}
+                                  title={isDisputed ? "View Dispute" : "Flag Dispute"}
+                                >
+                                  <Flag className="h-3.5 w-3.5 fill-current" />
+                                </Button>
                               </TableCell>
                             </TableRow>
-                          )}
 
-                          {/* INLINE DISPUTE LOGIC: Expand a small UI underneath row */}
-                          {isDisputeRowOpen && (
-                            <TableRow className="bg-amber-50/60 border-b border-slate-200">
-                              <TableCell colSpan={6} className="p-4">
-                                <div className="p-4 rounded-lg border border-amber-300 bg-white space-y-3 shadow-xs">
-                                  <div className="flex items-center justify-between border-b border-amber-200 pb-2">
-                                    <span className="font-bold text-xs text-amber-950 flex items-center gap-1.5">
-                                      <AlertTriangle className="h-4 w-4 text-amber-600" />
-                                      Flag Dispute on {trip.id} ({trip.route})
-                                    </span>
-                                    <span className="text-[11px] text-slate-500">
-                                      Line Total: ₹{trip.totalAmount.toLocaleString("en-IN")}
-                                    </span>
-                                  </div>
-
-                                  <div className="grid grid-cols-2 gap-3">
-                                    {/* Dispute Reason Dropdown */}
-                                    <div>
-                                      <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                                        Dispute Reason *
-                                      </label>
-                                      <select
-                                        value={disputeReason}
-                                        onChange={(e) => setDisputeReason(e.target.value)}
-                                        className="w-full h-8 text-xs rounded-md border border-slate-300 bg-white px-2 text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-950"
-                                      >
-                                        <option value="Damaged Goods">Damaged Goods in Transit</option>
-                                        <option value="Late Delivery Penalty">Late Delivery SLA Penalty</option>
-                                        <option value="Missing Quantity / Shortage">Missing Quantity / Seal Breach</option>
-                                        <option value="Incorrect Demurrage / Waiting">Incorrect Demurrage / Waiting Charge</option>
-                                        <option value="POD Signature Missing">POD Signature Missing / Invalid</option>
-                                      </select>
+                            {/* Inline Dispute Drawer */}
+                            {isDisputeRowOpen && (
+                              <TableRow className="bg-amber-50/60 border-b border-slate-200">
+                                <TableCell colSpan={6} className="p-4">
+                                  <div className="p-4 rounded-lg border border-amber-300 bg-white space-y-3 shadow-xs">
+                                    <div className="flex items-center justify-between border-b border-amber-200 pb-2">
+                                      <span className="font-bold text-xs text-amber-950 flex items-center gap-1.5">
+                                        <AlertTriangle className="h-4 w-4 text-amber-600" />
+                                        {isDisputed ? "Dispute Details" : "Flag Dispute"} on {tripId} ({route})
+                                      </span>
+                                      <span className="text-[11px] text-slate-500">
+                                        Line Total: ₹{totalAmount.toLocaleString("en-IN")}
+                                      </span>
                                     </div>
 
-                                    {/* Deducted Amount (₹) */}
-                                    <div>
-                                      <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                                        Deduction Amount (₹) *
-                                      </label>
-                                      <Input
-                                        type="number"
-                                        value={disputeAmountInput}
-                                        onChange={(e) => setDisputeAmountInput(e.target.value)}
-                                        className="h-8 text-xs font-mono"
-                                        placeholder="0"
-                                      />
-                                    </div>
-                                  </div>
+                                    {/* Dispute Thread if already disputed and disputeId exists */}
+                                    {disputeId && activeDisputeThread && (
+                                      <div className="space-y-2 border-b border-amber-100 pb-3">
+                                        <h5 className="font-bold text-[11px] text-slate-700">Dispute Discussion Thread</h5>
+                                        <div className="max-h-36 overflow-y-auto space-y-1.5 bg-slate-50 p-2.5 rounded border border-slate-200 text-xs">
+                                          {activeDisputeThread.messages && activeDisputeThread.messages.length > 0 ? (
+                                            activeDisputeThread.messages.map((m) => (
+                                              <div key={m.id} className="border-b border-slate-100 pb-1 last:border-none">
+                                                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                                                  <span className="font-bold text-slate-700">{m.author}</span>
+                                                  <span>{m.createdAt}</span>
+                                                </div>
+                                                <p className="text-slate-800 mt-0.5">{m.body}</p>
+                                              </div>
+                                            ))
+                                          ) : (
+                                            <p className="text-slate-400 italic">No messages in this dispute thread yet.</p>
+                                          )}
+                                        </div>
 
-                                  {/* Textarea for comments */}
-                                  <div>
-                                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                                      Dispute Justification & Comments *
-                                    </label>
-                                    <Textarea
-                                      rows={2}
-                                      value={disputeComments}
-                                      onChange={(e) => setDisputeComments(e.target.value)}
-                                      className="text-xs border-slate-300"
-                                      placeholder="Explain discrepancy details for logistics vendor review..."
-                                    />
-                                  </div>
-
-                                  {/* Dispute Actions */}
-                                  <div className="flex items-center justify-between pt-1">
-                                    {trip.isDisputed ? (
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleRemoveDispute(trip.id)}
-                                        className="h-7 text-xs text-red-600 border-red-200 hover:bg-red-50"
-                                      >
-                                        Remove Dispute
-                                      </Button>
-                                    ) : (
-                                      <div />
+                                        <div className="flex gap-2 pt-1">
+                                          <Input
+                                            type="text"
+                                            placeholder="Type a response..."
+                                            value={newMessageBody}
+                                            onChange={(e) => setNewMessageBody(e.target.value)}
+                                            className="h-8 text-xs"
+                                          />
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            disabled={sendingMessage || !newMessageBody.trim()}
+                                            onClick={() => handleSendMessage(disputeId)}
+                                            className="h-8 text-xs bg-slate-900 text-white"
+                                          >
+                                            {sendingMessage ? "Sending..." : "Reply"}
+                                          </Button>
+                                        </div>
+                                      </div>
                                     )}
 
-                                    <div className="flex items-center space-x-2">
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => setActiveDisputeTripId(null)}
-                                        className="h-7 text-xs border-slate-300"
-                                      >
-                                        Cancel
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        onClick={() => handleSaveDispute(trip.id)}
-                                        className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold"
-                                      >
-                                        Save Line Dispute
-                                      </Button>
-                                    </div>
+                                    {/* Dispute Form (if not yet disputed) */}
+                                    {!isDisputed && (
+                                      <>
+                                        <div className="grid grid-cols-2 gap-3">
+                                          <div>
+                                            <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                                              Dispute Reason *
+                                            </label>
+                                            <select
+                                              value={disputeReason}
+                                              onChange={(e) => setDisputeReason(e.target.value)}
+                                              className="w-full h-8 text-xs rounded-md border border-slate-300 bg-white px-2 text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-950"
+                                            >
+                                              <option value="Damaged Goods">Damaged Goods in Transit</option>
+                                              <option value="Late Delivery Penalty">Late Delivery SLA Penalty</option>
+                                              <option value="Missing Quantity / Shortage">Missing Quantity / Seal Breach</option>
+                                              <option value="Incorrect Demurrage / Waiting">Incorrect Demurrage / Waiting Charge</option>
+                                              <option value="POD Signature Missing">POD Signature Missing / Invalid</option>
+                                            </select>
+                                          </div>
+
+                                          <div>
+                                            <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                                              Deduction Amount (₹) *
+                                            </label>
+                                            <Input
+                                              type="number"
+                                              value={disputeAmountInput}
+                                              onChange={(e) => setDisputeAmountInput(e.target.value)}
+                                              className="h-8 text-xs font-mono"
+                                              placeholder="0"
+                                            />
+                                          </div>
+                                        </div>
+
+                                        <div>
+                                          <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                                            Dispute Justification & Comments *
+                                          </label>
+                                          <Textarea
+                                            rows={2}
+                                            value={disputeComments}
+                                            onChange={(e) => setDisputeComments(e.target.value)}
+                                            className="text-xs border-slate-300"
+                                            placeholder="Explain discrepancy details for logistics vendor review..."
+                                          />
+                                        </div>
+
+                                        <div className="flex items-center justify-end space-x-2 pt-1">
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setActiveDisputeTripId(null)}
+                                            className="h-7 text-xs border-slate-300"
+                                          >
+                                            Cancel
+                                          </Button>
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            disabled={disputing}
+                                            onClick={() => handleSaveDispute(tripId)}
+                                            className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold"
+                                          >
+                                            {disputing ? "Submitting..." : "Save Line Dispute"}
+                                          </Button>
+                                        </div>
+                                      </>
+                                    )}
+
+                                    {isDisputed && !disputeId && (
+                                      <div className="flex items-center justify-between pt-1">
+                                        <span className="text-xs text-amber-800">
+                                          Dispute logged on this line: {String(trip.disputeReason ?? "Disputed")}
+                                        </span>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => setActiveDisputeTripId(null)}
+                                          className="h-7 text-xs border-slate-300"
+                                        >
+                                          Close
+                                        </Button>
+                                      </div>
+                                    )}
                                   </div>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </React.Fragment>
+                        );
+                      })
+                    )}
                   </TableBody>
                 </Table>
               </div>
@@ -1185,7 +1314,7 @@ export default function ClientAccountsPayablePortal() {
               <div>
                 <span className="text-slate-500 font-sans block text-[11px]">Gross Invoice Amount</span>
                 <span className="font-bold text-slate-800">
-                  ₹{selectedInvoice?.grossAmount.toLocaleString("en-IN")}
+                  ₹{selectedGrossAmount.toLocaleString("en-IN")}
                 </span>
               </div>
 
@@ -1212,8 +1341,9 @@ export default function ClientAccountsPayablePortal() {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => alert(`Downloading Tax Invoice ${selectedInvoice?.invoiceNo}.pdf`)}
-                className="h-8 text-xs border-slate-300 text-slate-700"
+                disabled
+                title="PDF generation coming soon"
+                className="h-8 text-xs border-slate-300 text-slate-700 opacity-60 cursor-not-allowed"
               >
                 <Download className="h-3.5 w-3.5 mr-1" />
                 Download PDF
@@ -1232,12 +1362,15 @@ export default function ClientAccountsPayablePortal() {
             <Button
               type="button"
               size="sm"
+              disabled={approving}
               onClick={handleApproveInvoice}
               className="h-9 px-4 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md flex items-center gap-1.5"
             >
               <CheckCircle2 className="h-4 w-4" />
-              {totalDeductions > 0
-                ? `Approve with Debit Note (₹${netPayableAuthorized.toLocaleString("en-IN")})`
+              {approving
+                ? "Approving..."
+                : totalDeductions > 0
+                ? `Approve with Deductions (₹${netPayableAuthorized.toLocaleString("en-IN")})`
                 : "Approve Invoice for Payment"}
             </Button>
           </DialogFooter>
