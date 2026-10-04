@@ -1,0 +1,246 @@
+
+----------------------------------------------------------------------
+== FRONTEND VERIFICATION REPORT
+----------------------------------------------------------------------
+Generated : 2026-10-04 10:03:02
+Directory : C:\Users\himan\OneDrive\Desktop\B2B-3PL-Invoice-Settlement-Platform
+
+
+----------------------------------------------------------------------
+== 1. REQUIRED FILES PRESENCE
+----------------------------------------------------------------------
+  [MISSING] lib\api\client.ts
+  [MISSING] lib\api\refresh.ts
+  [MISSING] lib\api\types.ts
+  [MISSING] lib\api\index.ts
+  [MISSING] mocks\handlers.ts
+  [MISSING] mocks\browser.ts
+  [FOUND  ] middleware.ts
+  [FOUND  ] app\layout.tsx
+  [FOUND  ] app\page.tsx
+  [FOUND  ] app\login\page.tsx
+  [FOUND  ] app\invite\accept\page.tsx
+  [FOUND  ] app\dispatch\page.tsx
+  [FOUND  ] app\driver\page.tsx
+  [FOUND  ] app\audit\page.tsx
+  [FOUND  ] app\accounts\page.tsx
+  [FOUND  ] app\client-portal\page.tsx
+  [FOUND  ] app\admin\page.tsx
+  [MISSING] app\admin\users\page.tsx
+  [MISSING] app\admin\vehicles\page.tsx
+  [MISSING] app\admin\clients\page.tsx
+  [MISSING] app\admin\vendors\page.tsx
+  [MISSING] app\admin\routes\page.tsx
+  [MISSING] app\admin\rate-cards\page.tsx
+  [MISSING] app\vendor-portal\page.tsx
+
+----------------------------------------------------------------------
+== 2. MIDDLEWARE.TS CONTENT
+----------------------------------------------------------------------
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+
+const protectedRoutes = [
+  "/dispatch",
+  "/audit",
+  "/accounts",
+  "/driver",
+  "/client-portal",
+  "/admin",
+];
+
+const appAliases: Record<string, string> = {
+  "/app": "/dispatch",
+  "/app/dispatch": "/dispatch",
+  "/app/audit": "/audit",
+  "/app/accounts": "/accounts",
+  "/app/billing": "/accounts",
+  "/app/driver": "/driver",
+  "/app/client-portal": "/client-portal",
+  "/app/admin": "/admin",
+};
+
+export function middleware(request: NextRequest) {
+  const token = request.cookies.get("vecto_access_token")?.value;
+  const { pathname } = request.nextUrl;
+  const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/+$/, "") || "/";
+
+  const aliasTarget = appAliases[normalizedPath];
+
+  if (aliasTarget) {
+    if (!token) {
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
+
+    return NextResponse.redirect(new URL(aliasTarget, request.url));
+  }
+
+  if (normalizedPath === "/") {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  const isProtected = protectedRoutes.some(
+    (route) => normalizedPath === route || normalizedPath.startsWith(`${route}/`)
+  );
+
+  if (isProtected && !token) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("from", pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: [
+    "/",
+    "/login",
+    "/dispatch/:path*",
+    "/audit/:path*",
+    "/accounts/:path*",
+    "/driver/:path*",
+    "/client-portal/:path*",
+    "/admin/:path*",
+    "/app",
+    "/app/:path*",
+  ],
+};
+
+----------------------------------------------------------------------
+== 3. API CLIENT LAYER (lib/api/*.ts)
+----------------------------------------------------------------------
+  lib\api\ directory empty or missing
+
+----------------------------------------------------------------------
+== 4. MSW SETUP
+----------------------------------------------------------------------
+  mocks\ directory missing
+  package.json msw: NOT PRESENT
+
+----------------------------------------------------------------------
+== 5. MOCK DATA STILL IN PAGE FILES
+----------------------------------------------------------------------
+  Searching: INITIAL_ / simulated / TRIP-8842 / VEC-INV- / MH 12 RN
+
+  \app\accounts\page.tsx:111  id: "TRIP-8842",
+  \app\accounts\page.tsx:189  invoiceNo: "VEC-INV-2026-1001",
+  \app\accounts\page.tsx:200  invoiceNo: "VEC-INV-2026-0988",
+  \app\accounts\page.tsx:211  invoiceNo: "VEC-INV-2026-0940",
+  \app\accounts\page.tsx:222  invoiceNo: "VEC-INV-2026-0925",
+  \app\accounts\page.tsx:251  const [selectedTripIds, setSelectedTripIds] = useState<string[]>(["TRIP-8842", "TRIP-8848"]);
+  \app\accounts\page.tsx:331  const generatedInvoiceNumber = `VEC-INV-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+  \app\admin\page.tsx:108  const INITIAL_USERS: MasterUser[] = [
+  \app\admin\page.tsx:183  const INITIAL_VEHICLES: MasterVehicle[] = [
+  \app\admin\page.tsx:185  regNo: "MH 12 RN 4920",
+  \app\admin\page.tsx:218  const INITIAL_DRIVERS: MasterDriver[] = [
+  \app\admin\page.tsx:224  assignedTruck: "MH 12 RN 4920",
+  \app\admin\page.tsx:251  const [users, setUsers] = useState<MasterUser[]>(INITIAL_USERS);
+  \app\admin\page.tsx:367  { name: "Vehicles", icon: Truck, tab: "vehicles", badge: `${INITIAL_VEHICLES.length}` },
+  \app\admin\page.tsx:368  { name: "Drivers", icon: UserCheck, tab: "drivers", badge: `${INITIAL_DRIVERS.length}` },
+  \app\admin\page.tsx:697  {INITIAL_VEHICLES.map((v) => (
+  \app\admin\page.tsx:751  {INITIAL_DRIVERS.map((d) => (
+  \app\audit\page.tsx:107  id: "TRIP-8842",
+  \app\audit\page.tsx:144  regNo: "MH 12 RN 4920",
+  \app\audit\page.tsx:274  const [selectedTripId, setSelectedTripId] = useState<string>("TRIP-8842");
+  \app\audit\page.tsx:910  {/* Simulated Physical Lorry Receipt Header */}
+  \app\audit\page.tsx:1055  {/* Digital Signature Simulated Box */}
+  \app\client-portal\page.tsx:91  const INITIAL_INVOICES: ClientInvoice[] = [
+  \app\client-portal\page.tsx:102  id: "TRIP-8842",
+  \app\client-portal\page.tsx:213  const [invoices, setInvoices] = useState<ClientInvoice[]>(INITIAL_INVOICES);
+  \app\dispatch\page.tsx:41  { id: "TRIP-8842", vehicle: "KA 01 AJ 3319", driver: "Manjunath S.", initials: "MS", origin: "Hosur DC", destination: "Whitefield, Bengaluru", eta: "14:20", status: "In transit", cod: 24500 },
+  \app\dispatch\page.tsx:42  { id: "TRIP-8841", vehicle: "MH 12 RN 4920", driver: "Rajesh Kumar", initials: "RK", origin: "Bhiwandi Hub", destination: "Sanand Industrial Park", eta: "15:05", status: "Delayed", cod: 48500 },
+  \app\driver\page.tsx:178  MH 12 RN 4920
+  \app\driver\page.tsx:316  {/* Simulated GPS Routing HUD */}
+  \app\driver\page.tsx:336  {/* Simulated Map Visual Box */}
+  \app\invite\accept\page.tsx:118  // Simulated API call latency
+  \backend\src\dispatch\dispatch.service.spec.ts:219  vehicle: { regNo: 'MH 12 RN 4920' },
+  \backend\src\dispatch\dispatch.service.spec.ts:246  regNo: 'MH 12 RN 4920',
+  \backend\src\driver\driver.service.spec.ts:48  vehicle: { regNo: 'MH 12 RN 4920' },
+  \backend\src\driver\driver.service.spec.ts:72  vehicleRegNo: 'MH 12 RN 4920',
+
+----------------------------------------------------------------------
+== 6. REAL API IMPORTS IN PAGES
+----------------------------------------------------------------------
+  Looking for: from '@/lib/api' / apiClient. / await fetch(
+
+
+----------------------------------------------------------------------
+== 7. AUTH WIRING — /login
+----------------------------------------------------------------------
+  Lines: 248
+  Contains 'demo_session_token': False
+  Contains 'apiClient|authService': False
+  Contains 'login': True
+
+----------------------------------------------------------------------
+== 8. MIDDLEWARE RED FLAGS
+----------------------------------------------------------------------
+  demo_session_token      : False
+  vecto_access_token      : True
+  JWT verify (jose/jwt)   : False
+  Redirects to /login     : True
+  Uses matcher config     : True
+
+----------------------------------------------------------------------
+== 9. PACKAGE.JSON
+----------------------------------------------------------------------
+  Dependencies:
+    @radix-ui/react-dialog                   ^1.1.2
+    @radix-ui/react-label                    ^2.1.0
+    @radix-ui/react-slot                     ^1.1.0
+    class-variance-authority                 ^0.7.0
+    clsx                                     ^2.1.1
+    lucide-react                             ^0.460.0
+    next                                     ^14.2.15
+    react                                    ^18.3.1
+    react-dom                                ^18.3.1
+    tailwind-merge                           ^2.5.4
+
+  Dev Dependencies:
+    @types/node                              ^20
+    @types/react                             ^18
+    @types/react-dom                         ^18
+    autoprefixer                             ^10.4.20
+    postcss                                  ^8.4.47
+    tailwindcss                              ^3.4.14
+    typescript                               ^5
+
+  Scripts:
+    dev                  next dev
+    build                next build
+    start                next start
+    lint                 next lint
+
+----------------------------------------------------------------------
+== 10. LINE COUNT PER ROUTE
+----------------------------------------------------------------------
+  app\login\page.tsx                            248 lines
+  app\invite\accept\page.tsx                    336 lines
+  app\page.tsx                                  14 lines
+  app\dispatch\page.tsx                         211 lines
+  app\driver\page.tsx                           647 lines
+  app\audit\page.tsx                            1339 lines
+  app\accounts\page.tsx                         1148 lines
+  app\client-portal\page.tsx                    1173 lines
+  app\admin\page.tsx                            875 lines
+  app\vendor-portal\page.tsx                    MISSING
+
+----------------------------------------------------------------------
+== 11. ADMIN SUB-ROUTES
+----------------------------------------------------------------------
+  app\admin\users\page.tsx                      MISSING
+  app\admin\vehicles\page.tsx                   MISSING
+  app\admin\clients\page.tsx                    MISSING
+  app\admin\vendors\page.tsx                    MISSING
+  app\admin\routes\page.tsx                     MISSING
+  app\admin\rate-cards\page.tsx                 MISSING
+
+----------------------------------------------------------------------
+== 12. TSC + BUILD
+----------------------------------------------------------------------
+  node_modules not found. Run 'npm install' first.
+
+----------------------------------------------------------------------
+== END OF REPORT
+----------------------------------------------------------------------

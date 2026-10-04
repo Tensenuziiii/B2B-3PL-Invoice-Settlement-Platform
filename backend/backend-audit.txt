@@ -1,0 +1,1600 @@
+
+
+========== PRISMA SCHEMA ==========
+FILE: .\prisma\schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  DISPATCH_MANAGER
+  DRIVER
+  AUDITOR
+  ACCOUNTS
+  CLIENT_AP
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  LOCKED
+  INACTIVE
+}
+
+enum TripStatus {
+  PLANNED
+  DISPATCHED
+  IN_TRANSIT
+  DELAYED
+  ARRIVED
+  UNLOADING
+  DELIVERED
+  EOD_PENDING
+  EOD_CLOSED
+  AUDIT_PENDING
+  AUDIT_FLAGGED
+  AUDIT_VERIFIED
+  BILLED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  PUBLISHED
+  PENDING_APPROVAL
+  PARTIALLY_DISPUTED
+  APPROVED
+  PAID
+  OVERDUE
+}
+
+enum AlertSeverity {
+  INFO
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum NotificationType {
+  TRIP
+  ALERT
+  INVOICE
+  PAYMENT
+  AUDIT
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  passwordHash       String?
+  name               String
+  initials           String    @default("VL")
+  role               Role
+  status             UserStatus @default(ACTIVE)
+  failedLoginAttempts Int       @default(0)
+  lockedUntil        DateTime?
+  displayId          String
+  hubName            String?
+  clientId           String?
+  client             Client?   @relation(fields: [clientId], references: [id])
+  refreshTokens      RefreshToken[]
+  passwordResetToken PasswordResetToken[]
+  loginAttempts      LoginAttempt[]
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
+
+  @@index([role, status])
+}
+
+model RefreshToken {
+  id          String    @id @default(cuid())
+  tokenHash   String    @unique
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  familyId    String?
+  createdAt   DateTime  @default(now())
+  replacedBy  String?
+  userAgent   String?
+  ipAddress   String?
+
+  @@index([userId, revokedAt])
+  @@index([familyId, revokedAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model Hub {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  region      String?
+  city        String?
+  stateCode   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  trips       Trip[]
+}
+
+model Client {
+  id                String    @id @default(cuid())
+  name              String
+  code              String    @unique
+  gstin             String?
+  stateCode         String?
+  paymentTermsDays  Int       @default(30)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+  users             User[]
+  trips             Trip[]
+  invoices          Invoice[]
+}
+
+model Vehicle {
+  id               String    @id @default(cuid())
+  regNo            String    @unique
+  currentOdometer  Int
+  active           Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+  trips            Trip[]
+}
+
+model Driver {
+  id            String    @id @default(cuid())
+  name          String
+  phone         String
+  userId        String?   @unique
+  dutyStatus    String?   @default("OFFLINE")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+  trips         Trip[]
+}
+
+model Shift {
+  id        String    @id @default(cuid())
+  date      DateTime
+  number    Int       @default(1)
+  startAt   DateTime?
+  endAt     DateTime?
+  createdAt DateTime  @default(now())
+  trips     Trip[]
+}
+
+model Trip {
+  id              String    @id @default(cuid())
+  tripCode        String    @unique
+  status          TripStatus @default(PLANNED)
+  version         Int       @default(0)
+  hubId           String?
+  hub             Hub?      @relation(fields: [hubId], references: [id])
+  clientId        String?
+  client          Client?   @relation(fields: [clientId], references: [id])
+  driverId        String?
+  driver          Driver?   @relation(fields: [driverId], references: [id])
+  vehicleId       String?
+  vehicle         Vehicle?  @relation(fields: [vehicleId], references: [id])
+  shiftId         String?
+  shift           Shift?    @relation(fields: [shiftId], references: [id])
+  origin         String?
+  destination     String?
+  eta            DateTime?
+  startOdometer  Int?
+  currentOdometer Int?
+  delayMinutes   Int       @default(0)
+  delayReason    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+  tripStops      TripStop[]
+  lorryReceipt   LorryReceipt?
+  pod            Pod?
+  expenses       TripExpense[]
+  advances       DriverAdvance[]
+  eodTally       EodTally?
+  invoiceLine    InvoiceLine?
+
+  @@index([status, hubId])
+}
+
+model TripStop {
+  id          String   @id @default(cuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id])
+  order       Int
+  name        String?
+  address     String?
+  createdAt   DateTime @default(now())
+
+  @@index([tripId, order])
+}
+
+model LorryReceipt {
+  id            String    @id @default(cuid())
+  tripId        String    @unique
+  trip          Trip      @relation(fields: [tripId], references: [id])
+  lrNo          String    @unique
+  consignor     String?
+  consignee     String?
+  pallets       Int?
+  weightKg      Int?
+  codAmount     Int?
+  goodsDescription String?
+  createdAt     DateTime  @default(now())
+  deletedAt     DateTime?
+}
+
+model Pod {
+  id                  String    @id @default(cuid())
+  tripId              String    @unique
+  trip                Trip      @relation(fields: [tripId], references: [id])
+  photoKey            String?
+  signatureKey        String?
+  signatoryName       String?
+  designation        String?
+  dockGpsLat          Float?
+  dockGpsLng          Float?
+  gpsAccuracyPercent  Int?
+  gateInTimestamp     DateTime?
+  stampVerified      Boolean   @default(false)
+  authHash           String?
+  device             String?
+  createdAt          DateTime  @default(now())
+}
+
+model DriverAdvance {
+  id         String   @id @default(cuid())
+  tripId     String
+  trip       Trip     @relation(fields: [tripId], references: [id])
+  amount     Int
+  createdAt  DateTime @default(now())
+}
+
+model TripExpense {
+  id          String   @id @default(cuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id])
+  type        String
+  amount      Int
+  receiptRef  String?
+  createdAt   DateTime @default(now())
+}
+
+model EodTally {
+  id                   String   @id @default(cuid())
+  tripId               String   @unique
+  trip                 Trip     @relation(fields: [tripId], references: [id])
+  toll                 Int      @default(0)
+  allowance            Int      @default(0)
+  fuel                 Int      @default(0)
+  advance              Int      @default(0)
+  actualCash           Int      @default(0)
+  netExpected          Int      @default(0)
+  discrepancy          Int      @default(0)
+  createdAt            DateTime @default(now())
+}
+
+model AuditReview {
+  id              String   @id @default(cuid())
+  tripId          String
+  auditorId      String?
+  gateDistance   Boolean  @default(false)
+  gateCash       Boolean  @default(false)
+  gateSignature  Boolean  @default(false)
+  gateStamp      Boolean  @default(false)
+  gateDoc        Boolean  @default(false)
+  decision       String?
+  notes          String?
+  slaDueAt       DateTime?
+  createdAt      DateTime @default(now())
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  invoiceNumber   String        @unique
+  status         InvoiceStatus @default(DRAFT)
+  clientId       String?
+  client         Client?       @relation(fields: [clientId], references: [id])
+  issueDate      DateTime      @default(now())
+  dueDate        DateTime?
+  subtotal       Int           @default(0)
+  gst            Int           @default(0)
+  total          Int           @default(0)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  deletedAt      DateTime?
+  lines          InvoiceLine[]
+  payments       Payment[]
+
+  @@index([status, dueDate])
+  @@index([clientId, createdAt])
+}
+
+model InvoiceLine {
+  id             String    @id @default(cuid())
+  invoiceId      String
+  invoice        Invoice   @relation(fields: [invoiceId], references: [id])
+  tripId         String    @unique
+  trip           Trip      @relation(fields: [tripId], references: [id])
+  lineAmount     Int
+  gstAmount      Int
+  totalAmount    Int
+  createdAt      DateTime  @default(now())
+}
+
+model Payment {
+  id          String    @id @default(cuid())
+  invoiceId    String
+  invoice     Invoice   @relation(fields: [invoiceId], references: [id])
+  amount      Int
+  method      String?
+  paidAt      DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+}
+
+model Notification {
+  id          String             @id @default(cuid())
+  userId      String?
+  type        NotificationType?
+  title       String
+  body        String
+  readAt      DateTime?
+  createdAt   DateTime           @default(now())
+}
+
+model SystemAlert {
+  id           String        @id @default(cuid())
+  title        String
+  severity     AlertSeverity @default(MEDIUM)
+  vehicle      String?
+  source       String?
+  dismissedBy  String?
+  dismissedAt  DateTime?
+  createdAt    DateTime      @default(now())
+}
+
+model InvoiceSequence {
+  id          String   @id @default(cuid())
+  financialYear String
+  counter     Int      @default(0)
+  prefix      String   @default("INV")
+}
+
+model AuditLog {
+  id          String    @id @default(cuid())
+  actorId     String?
+  actorRole   String?
+  action      String
+  entity      String
+  entityId    String
+  beforeJson  Json?
+  afterJson   Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime  @default(now())
+}
+
+model IdempotencyKey {
+  id          String    @id @default(cuid())
+  key         String    @unique
+  endpoint    String
+  responseHash String
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+}
+
+model LoginAttempt {
+  id            String   @id @default(cuid())
+  email         String
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  succeeded     Boolean  @default(false)
+  failureReason String?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([userId, createdAt])
+  @@index([succeeded, createdAt])
+}
+
+
+========== ERROR FILTER ==========
+FILE: .\src\common\filters\http-exception.filter.ts
+import {
+  ArgumentsHost,
+  Catch,
+  ExceptionFilter,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
+import { Request, Response } from 'express';
+
+@Catch()
+export class AllExceptionsFilter implements ExceptionFilter {
+  private readonly logger = new Logger(AllExceptionsFilter.name);
+
+  catch(exception: unknown, host: ArgumentsHost): void {
+    const ctx = host.switchToHttp();
+    const req = ctx.getRequest<Request>();
+    const res = ctx.getResponse<Response>();
+
+    const requestId = req.headers['x-request-id'] ?? 'n/a';
+
+    const status =
+      exception instanceof HttpException
+        ? exception.getStatus()
+        : HttpStatus.INTERNAL_SERVER_ERROR;
+
+    const response =
+      exception instanceof HttpException
+        ? exception.getResponse()
+        : { message: 'Internal server error' };
+
+    const payload = {
+      code: status,
+      message:
+        typeof response === 'object' && response !== null && 'message' in response
+          ? (response.message as string)
+          : 'Unexpected error',
+      details:
+        typeof response === 'object' && response !== null && 'details' in response
+          ? response.details
+          : undefined,
+      requestId,
+    };
+
+    this.logger.error(
+      `${req.method} ${req.url} failed`,
+      exception instanceof Error ? exception.stack : undefined,
+    );
+
+    res.status(status).json(payload);
+  }
+}
+
+
+========== AUTH CONTROLLER ==========
+FILE: .\src\auth\auth.controller.ts
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { Request, Response } from 'express';
+import { AuthService } from './auth.service';
+import { JwtAuthGuard } from './jwt-auth.guard';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { LoginDto } from './dto/login.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+
+@ApiTags('auth')
+@Controller('auth')
+export class AuthController {
+  constructor(private readonly authService: AuthService) {}
+
+  @Post('login')
+  @ApiOperation({ summary: 'Authenticate user and return access token' })
+  async login(
+    @Body() dto: LoginDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { refreshToken, ...result } = await this.authService.login(dto, {
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
+    this.setRefreshCookie(res, refreshToken);
+    return result;
+  }
+
+  @Post('refresh')
+  @ApiOperation({ summary: 'Refresh access token' })
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { accessToken, refreshToken } = await this.authService.refresh(
+      req.cookies?.refresh_token,
+    );
+    this.setRefreshCookie(res, refreshToken);
+    return { accessToken };
+  }
+
+  @Post('logout')
+  @ApiOperation({ summary: 'Invalidate a session' })
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    await this.authService.logout(req.cookies?.refresh_token);
+    res.clearCookie('refresh_token', { path: '/auth', sameSite: 'strict' });
+    return { success: true, message: 'Logged out successfully.' };
+  }
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current user details' })
+  me(@Req() req: any) {
+    return this.authService.me(req.user);
+  }
+
+  @Post('forgot-password')
+  @ApiOperation({ summary: 'Request password reset link' })
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.requestPasswordReset(dto.email);
+  }
+
+  @Post('reset-password')
+  @ApiOperation({ summary: 'Reset password using a one-time token' })
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto.token, dto.newPassword);
+  }
+
+  @Get('sso/start')
+  @ApiOperation({
+    summary: 'Start SSO flow for a configured identity provider',
+  })
+  ssoStart() {
+    return {
+      provider: 'mock-oidc',
+      url: '/auth/sso/callback',
+      message: 'Mock SSO provider is active in local development.',
+    };
+  }
+
+  @Get('sso/callback')
+  @ApiOperation({ summary: 'Handle SSO callback and issue a signed session' })
+  ssoCallback() {
+    return {
+      success: true,
+      redirectPath: '/dispatch',
+      message: 'SSO callback accepted in mock mode.',
+    };
+  }
+
+  @Get('presets')
+  @ApiOperation({ summary: 'Return demo presets for login autofill' })
+  presets() {
+    return this.authService.getPresets();
+  }
+
+  private setRefreshCookie(res: Response, refreshToken: string) {
+    res.cookie('refresh_token', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/auth',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
+  }
+}
+
+
+========== AUTH SERVICE ==========
+FILE: .\src\auth\auth.service.ts
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Role, UserStatus } from '@prisma/client';
+import { JwtService } from '@nestjs/jwt';
+import * as argon2 from 'argon2';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { PrismaService } from '../prisma/prisma.service';
+import { LoginDto } from './dto/login.dto';
+
+const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000;
+const LOGIN_FAILURE_LIMIT = 5;
+const LOGIN_LOCK_DURATION_MS = 15 * 60 * 1000;
+
+type TokenPayload = {
+  sub: string;
+  email: string;
+  role: Role;
+  displayId: string;
+  hubName: string | null;
+};
+
+export type LoginRequestMetadata = {
+  ipAddress?: string;
+  userAgent?: string;
+};
+
+const LOGIN_PRESETS = [
+  {
+    email: 'dispatch@vectologistics.in',
+    role: Role.DISPATCH_MANAGER,
+    label: 'Dispatch Manager',
+    redirectPath: '/dispatch',
+  },
+  {
+    email: 'driver.rajesh@vectologistics.in',
+    role: Role.DRIVER,
+    label: 'Driver Mobile App',
+    redirectPath: '/driver',
+  },
+  {
+    email: 'audit.lead@vectologistics.in',
+    role: Role.AUDITOR,
+    label: 'Internal Audit Desk',
+    redirectPath: '/audit',
+  },
+  {
+    email: 'billing.finance@vectologistics.in',
+    role: Role.ACCOUNTS,
+    label: 'Accounts & Billing',
+    redirectPath: '/accounts',
+  },
+  {
+    email: 'ap.payments@metro-wholesale.in',
+    role: Role.CLIENT_AP,
+    label: 'Client AP Portal',
+    redirectPath: '/client-portal',
+  },
+  {
+    email: 'admin@vectologistics.in',
+    role: Role.ADMIN,
+    label: 'Platform Administrator',
+    redirectPath: '/admin',
+  },
+] as const;
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  async login(dto: LoginDto, metadata: LoginRequestMetadata = {}) {
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (
+      !user ||
+      user.status !== UserStatus.ACTIVE ||
+      user.deletedAt ||
+      !user.passwordHash
+    ) {
+      await this.recordLoginAttempt({
+        email,
+        userId: user?.id,
+        succeeded: false,
+        failureReason: 'INVALID_CREDENTIALS',
+        metadata,
+      });
+      throw new UnauthorizedException('Invalid email or password.');
+    }
+
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      await this.recordLoginAttempt({
+        email,
+        userId: user.id,
+        succeeded: false,
+        failureReason: 'ACCOUNT_LOCKED',
+        metadata,
+      });
+      throw new UnauthorizedException('Invalid email or password.');
+    }
+
+    const valid = await argon2.verify(user.passwordHash, dto.password);
+    if (!valid) {
+      const failedLogin = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginAttempts: { increment: 1 } },
+      });
+      if (failedLogin.failedLoginAttempts >= LOGIN_FAILURE_LIMIT) {
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            lockedUntil: new Date(Date.now() + LOGIN_LOCK_DURATION_MS),
+          },
+        });
+      }
+      await this.recordLoginAttempt({
+        email,
+        userId: user.id,
+        succeeded: false,
+        failureReason: 'INVALID_CREDENTIALS',
+        metadata,
+      });
+      throw new UnauthorizedException('Invalid email or password.');
+    }
+
+    if (user.failedLoginAttempts > 0 || user.lockedUntil) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginAttempts: 0, lockedUntil: null },
+      });
+    }
+
+    const payload: TokenPayload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      displayId: user.displayId,
+      hubName: user.hubName,
+    };
+
+    const session = await this.createSession(payload, user.id, metadata);
+
+    const resultUser = {
+      id: payload.sub,
+      name: user.name,
+      initials: user.initials,
+      role: user.role,
+      displayId: user.displayId,
+      hubName: user.hubName,
+      redirectPath:
+        LOGIN_PRESETS.find((preset) => preset.role === user.role)
+          ?.redirectPath ?? '/dispatch',
+    };
+
+    return {
+      ...session,
+      user: resultUser,
+    };
+  }
+
+  async refresh(refreshToken: string | undefined) {
+    if (!refreshToken) {
+      throw new UnauthorizedException('Invalid or expired refresh token.');
+    }
+
+    const now = new Date();
+    const nextRefreshToken = randomBytes(48).toString('base64url');
+    const nextTokenHash = this.hashToken(nextRefreshToken);
+    const result = await this.prisma.$transaction(async (transaction) => {
+      const storedToken = await transaction.refreshToken.findUnique({
+        where: { tokenHash: this.hashToken(refreshToken) },
+        include: { user: true },
+      });
+
+      if (!storedToken) {
+        return null;
+      }
+
+      const familyId = storedToken.familyId ?? randomUUID();
+      if (storedToken.revokedAt || storedToken.expiresAt <= now) {
+        await transaction.refreshToken.updateMany({
+          where: { familyId, revokedAt: null },
+          data: { revokedAt: now },
+        });
+        return null;
+      }
+
+      if (
+        storedToken.user.status !== UserStatus.ACTIVE ||
+        storedToken.user.deletedAt
+      ) {
+        return null;
+      }
+
+      const claimedToken = await transaction.refreshToken.updateMany({
+        where: {
+          id: storedToken.id,
+          revokedAt: null,
+          expiresAt: { gt: now },
+        },
+        data: { revokedAt: now, familyId },
+      });
+
+      if (claimedToken.count !== 1) {
+        await transaction.refreshToken.updateMany({
+          where: { familyId, revokedAt: null },
+          data: { revokedAt: now },
+        });
+        return null;
+      }
+
+      const replacement = await transaction.refreshToken.create({
+        data: {
+          tokenHash: nextTokenHash,
+          userId: storedToken.userId,
+          familyId,
+          expiresAt: new Date(now.getTime() + REFRESH_TOKEN_TTL_MS),
+        },
+      });
+      await transaction.refreshToken.update({
+        where: { id: storedToken.id },
+        data: { replacedBy: replacement.id },
+      });
+
+      const payload: TokenPayload = {
+        sub: storedToken.user.id,
+        email: storedToken.user.email,
+        role: storedToken.user.role,
+        displayId: storedToken.user.displayId,
+        hubName: storedToken.user.hubName,
+      };
+
+      return {
+        accessToken: this.jwtService.sign(payload),
+        refreshToken: nextRefreshToken,
+      };
+    });
+
+    if (!result) {
+      throw new UnauthorizedException('Invalid or expired refresh token.');
+    }
+
+    return result;
+  }
+
+  async logout(refreshToken: string | undefined) {
+    if (refreshToken) {
+      await this.prisma.refreshToken.updateMany({
+        where: { tokenHash: this.hashToken(refreshToken), revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
+  }
+
+  async requestPasswordReset(email: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: email.trim().toLowerCase() },
+    });
+    const response = {
+      success: true,
+      message: 'If the email exists, a password reset link was sent.',
+    };
+
+    if (!user || user.status !== UserStatus.ACTIVE || user.deletedAt) {
+      return response;
+    }
+
+    const resetToken = randomBytes(32).toString('base64url');
+    const now = new Date();
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.passwordResetToken.updateMany({
+        where: { userId: user.id, usedAt: null },
+        data: { usedAt: now },
+      });
+      await transaction.passwordResetToken.create({
+        data: {
+          tokenHash: this.hashToken(resetToken),
+          userId: user.id,
+          expiresAt: new Date(now.getTime() + PASSWORD_RESET_TTL_MS),
+        },
+      });
+    });
+
+    return {
+      ...response,
+      resetToken: process.env.NODE_ENV === 'development' ? resetToken : undefined,
+    };
+  }
+
+  async resetPassword(resetToken: string, newPassword: string) {
+    const now = new Date();
+    const storedToken = await this.prisma.passwordResetToken.findUnique({
+      where: { tokenHash: this.hashToken(resetToken) },
+      include: { user: true },
+    });
+
+    if (
+      !storedToken ||
+      storedToken.usedAt ||
+      storedToken.expiresAt <= now ||
+      storedToken.user.status !== UserStatus.ACTIVE ||
+      storedToken.user.deletedAt
+    ) {
+      throw new UnauthorizedException('Invalid or expired password reset token.');
+    }
+
+    const passwordHash = await argon2.hash(newPassword);
+    const reset = await this.prisma.$transaction(async (transaction) => {
+      const consumed = await transaction.passwordResetToken.updateMany({
+        where: {
+          id: storedToken.id,
+          usedAt: null,
+          expiresAt: { gt: now },
+        },
+        data: { usedAt: now },
+      });
+      if (consumed.count !== 1) {
+        return false;
+      }
+
+      await transaction.user.update({
+        where: { id: storedToken.userId },
+        data: {
+          passwordHash,
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+        },
+      });
+      await transaction.refreshToken.updateMany({
+        where: { userId: storedToken.userId, revokedAt: null },
+        data: { revokedAt: now },
+      });
+      return true;
+    });
+
+    if (!reset) {
+      throw new UnauthorizedException('Invalid or expired password reset token.');
+    }
+
+    return { success: true, message: 'Password reset successfully.' };
+  }
+
+  me(user: TokenPayload) {
+    return {
+      id: user.sub,
+      email: user.email,
+      role: user.role,
+      displayId: user.displayId,
+      hubName: user.hubName,
+    };
+  }
+
+  getPresets() {
+    return LOGIN_PRESETS.map((user) => ({
+      role: user.role,
+      label: user.label,
+      email: user.email,
+      redirectPath: user.redirectPath,
+    }));
+  }
+
+  private async createSession(
+    payload: TokenPayload,
+    userId: string,
+    metadata: LoginRequestMetadata,
+  ) {
+    const refreshToken = randomBytes(48).toString('base64url');
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.refreshToken.create({
+        data: {
+          tokenHash: this.hashToken(refreshToken),
+          userId,
+          familyId: randomUUID(),
+          expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
+        },
+      });
+      await transaction.loginAttempt.create({
+        data: {
+          email: payload.email,
+          userId,
+          succeeded: true,
+          ipAddress: metadata.ipAddress,
+          userAgent: metadata.userAgent?.slice(0, 512),
+        },
+      });
+    });
+
+    return {
+      accessToken: this.jwtService.sign(payload),
+      refreshToken,
+    };
+  }
+
+  private hashToken(token: string) {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
+  private async recordLoginAttempt(input: {
+    email: string;
+    userId?: string;
+    succeeded: boolean;
+    failureReason?: string;
+    metadata: LoginRequestMetadata;
+  }) {
+    await this.prisma.loginAttempt.create({
+      data: {
+        email: input.email,
+        userId: input.userId,
+        succeeded: input.succeeded,
+        failureReason: input.failureReason,
+        ipAddress: input.metadata.ipAddress,
+        userAgent: input.metadata.userAgent?.slice(0, 512),
+      },
+    });
+  }
+}
+
+
+========== JWT GUARD ==========
+FILE: .\src\auth\jwt-auth.guard.ts
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { UserStatus } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+
+@Injectable()
+export class JwtAuthGuard implements CanActivate {
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest();
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      throw new UnauthorizedException('Missing bearer token.');
+    }
+
+    const token = authHeader.substring(7);
+
+    let payload: { sub?: string };
+    try {
+      payload = this.jwtService.verify(token);
+    } catch {
+      throw new UnauthorizedException('Invalid or expired access token.');
+    }
+
+    if (!payload.sub) {
+      throw new UnauthorizedException('Invalid or expired access token.');
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: { id: payload.sub, status: UserStatus.ACTIVE, deletedAt: null },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        displayId: true,
+        hubName: true,
+      },
+    });
+    if (!user) {
+      throw new UnauthorizedException('User is inactive or no longer exists.');
+    }
+
+    req.user = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      displayId: user.displayId,
+      hubName: user.hubName,
+    };
+    return true;
+  }
+}
+
+
+========== ROLES GUARD ==========
+FILE: .\src\common\guards\roles.guard.ts
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  ForbiddenException,
+} from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { ROLES_KEY } from '../decorators/roles.decorator';
+
+@Injectable()
+export class RolesGuard implements CanActivate {
+  constructor(private readonly reflector: Reflector) {}
+
+  canActivate(context: ExecutionContext): boolean {
+    const requiredRoles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+
+    if (!requiredRoles || requiredRoles.length === 0) {
+      return true;
+    }
+
+    const req = context.switchToHttp().getRequest();
+    const user = req.user;
+
+    if (!user || !user.role) {
+      throw new ForbiddenException('Access denied. Missing role context.');
+    }
+
+    if (!requiredRoles.includes(user.role)) {
+      throw new ForbiddenException('Access denied. Insufficient role permissions.');
+    }
+
+    return true;
+  }
+}
+
+
+========== USERS CONTROLLER ==========
+FILE: .\src\users\users.controller.ts
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { Role } from '@prisma/client';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { CreateUserDto } from './dto/create-user.dto';
+import { ListUsersQueryDto } from './dto/list-users-query.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { UsersService } from './users.service';
+
+@ApiTags('users')
+@ApiBearerAuth()
+@Controller('users')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.ADMIN)
+export class UsersController {
+  constructor(private readonly usersService: UsersService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'List users with search and pagination' })
+  list(@Query() query: ListUsersQueryDto) {
+    return this.usersService.list(query);
+  }
+
+  @Post()
+  @ApiOperation({ summary: 'Create a user with a hashed password' })
+  create(@Body() dto: CreateUserDto) {
+    return this.usersService.create(dto);
+  }
+
+  @Get('login-attempts')
+  @ApiOperation({ summary: 'List persisted login attempts, including unknown emails' })
+  listLoginAttempts(@Query() query: ListUsersQueryDto) {
+    return this.usersService.listLoginAttempts(query);
+  }
+
+  @Get(':id/login-history')
+  @ApiOperation({ summary: 'List persisted login attempts for a user' })
+  loginHistory(@Param('id') id: string, @Query() query: ListUsersQueryDto) {
+    return this.usersService.loginHistory(id, query.limit, query.offset);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get a user profile without credential fields' })
+  get(@Param('id') id: string) {
+    return this.usersService.get(id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update user profile, role, status, or password' })
+  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
+    return this.usersService.update(id, dto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Deactivate a user and revoke active sessions' })
+  deactivate(@Param('id') id: string) {
+    return this.usersService.deactivate(id);
+  }
+}
+
+
+========== USERS SERVICE ==========
+FILE: .\src\users\users.service.ts
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma, UserStatus } from '@prisma/client';
+import * as argon2 from 'argon2';
+import { PrismaService } from '../prisma/prisma.service';
+import { CreateUserDto } from './dto/create-user.dto';
+import { ListUsersQueryDto } from './dto/list-users-query.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
+
+const publicUserSelect = {
+  id: true,
+  email: true,
+  name: true,
+  initials: true,
+  role: true,
+  status: true,
+  displayId: true,
+  hubName: true,
+  clientId: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.UserSelect;
+
+@Injectable()
+export class UsersService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async list(query: ListUsersQueryDto) {
+    const where: Prisma.UserWhereInput = { deletedAt: null };
+    if (query.role) where.role = query.role;
+    if (query.status) where.status = query.status;
+    const search = query.search?.trim();
+    if (search) {
+      where.OR = [
+        { email: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search, mode: 'insensitive' } },
+        { displayId: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        select: publicUserSelect,
+        orderBy: { createdAt: 'desc' },
+        take: query.limit,
+        skip: query.offset,
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+    return {
+      data,
+      meta: { total, limit: query.limit, offset: query.offset },
+    };
+  }
+
+  async get(id: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id, deletedAt: null },
+      select: publicUserSelect,
+    });
+    if (!user) throw new NotFoundException('User not found.');
+    return user;
+  }
+
+  async create(dto: CreateUserDto) {
+    const passwordHash = await argon2.hash(dto.password);
+    const data: Prisma.UserUncheckedCreateInput = {
+      email: dto.email.trim().toLowerCase(),
+      name: dto.name.trim(),
+      initials: dto.initials?.trim().toUpperCase() ?? this.makeInitials(dto.name),
+      role: dto.role,
+      displayId: dto.displayId.trim(),
+      passwordHash,
+      hubName: dto.hubName?.trim() || null,
+      clientId: dto.clientId || null,
+    };
+
+    try {
+      return await this.prisma.user.create({ data, select: publicUserSelect });
+    } catch (error) {
+      this.throwIfEmailConflict(error);
+      throw error;
+    }
+  }
+
+  async update(id: string, dto: UpdateUserDto) {
+    await this.get(id);
+    const data: Prisma.UserUncheckedUpdateInput = {};
+    let shouldRevokeSessions = false;
+    if (dto.email !== undefined) data.email = dto.email.trim().toLowerCase();
+    if (dto.name !== undefined) data.name = dto.name.trim();
+    if (dto.initials !== undefined) data.initials = dto.initials.trim().toUpperCase();
+    if (dto.role !== undefined) data.role = dto.role;
+    if (dto.displayId !== undefined) data.displayId = dto.displayId.trim();
+    if (dto.hubName !== undefined) data.hubName = dto.hubName?.trim() || null;
+    if (dto.clientId !== undefined) data.clientId = dto.clientId || null;
+    if (dto.password !== undefined) {
+      data.passwordHash = await argon2.hash(dto.password);
+      data.failedLoginAttempts = 0;
+      data.lockedUntil = null;
+      shouldRevokeSessions = true;
+    }
+    if (dto.status !== undefined) {
+      data.status = dto.status;
+      data.deletedAt = dto.status === UserStatus.INACTIVE ? new Date() : null;
+      if (dto.status === UserStatus.ACTIVE) {
+        data.failedLoginAttempts = 0;
+        data.lockedUntil = null;
+      }
+      if (dto.status !== UserStatus.ACTIVE) shouldRevokeSessions = true;
+    }
+
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        const user = await transaction.user.update({
+          where: { id },
+          data,
+          select: publicUserSelect,
+        });
+        if (shouldRevokeSessions) {
+          await transaction.refreshToken.updateMany({
+            where: { userId: id, revokedAt: null },
+            data: { revokedAt: new Date() },
+          });
+        }
+        return user;
+      });
+    } catch (error) {
+      this.throwIfEmailConflict(error);
+      throw error;
+    }
+  }
+
+  async deactivate(id: string) {
+    await this.get(id);
+    const now = new Date();
+    const [user] = await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id },
+        data: { status: UserStatus.INACTIVE, deletedAt: now },
+        select: publicUserSelect,
+      }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: { revokedAt: now },
+      }),
+    ]);
+    return user;
+  }
+
+  async loginHistory(id: string, limit = 50, offset = 0) {
+    await this.get(id);
+    const safeLimit = Math.min(Math.max(Math.trunc(limit) || 50, 1), 100);
+    const safeOffset = Math.max(Math.trunc(offset) || 0, 0);
+    const [data, total] = await Promise.all([
+      this.prisma.loginAttempt.findMany({
+        where: { userId: id },
+        orderBy: { createdAt: 'desc' },
+        take: safeLimit,
+        skip: safeOffset,
+        select: {
+          id: true,
+          email: true,
+          succeeded: true,
+          failureReason: true,
+          ipAddress: true,
+          userAgent: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.loginAttempt.count({ where: { userId: id } }),
+    ]);
+    return { data, meta: { total, limit: safeLimit, offset: safeOffset } };
+  }
+
+  async listLoginAttempts(query: ListUsersQueryDto) {
+    const where: Prisma.LoginAttemptWhereInput = {};
+    const search = query.search?.trim();
+    if (search) {
+      where.OR = [
+        { email: { contains: search, mode: 'insensitive' } },
+        { ipAddress: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+    const [data, total] = await Promise.all([
+      this.prisma.loginAttempt.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: query.limit,
+        skip: query.offset,
+        select: {
+          id: true,
+          email: true,
+          succeeded: true,
+          failureReason: true,
+          ipAddress: true,
+          userAgent: true,
+          createdAt: true,
+          user: {
+            select: { id: true, name: true, role: true, displayId: true },
+          },
+        },
+      }),
+      this.prisma.loginAttempt.count({ where }),
+    ]);
+    return {
+      data,
+      meta: { total, limit: query.limit, offset: query.offset },
+    };
+  }
+
+  private makeInitials(name: string) {
+    return name
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join('')
+      .toUpperCase();
+  }
+
+  private throwIfEmailConflict(error: unknown): void {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw new ConflictException('A user with this email already exists.');
+    }
+  }
+}
+
+
+========== MAIN.TS ==========
+FILE: .\src\main.ts
+import { ValidationPipe } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
+import { AppModule } from './app.module';
+import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+import { RequestIdInterceptor } from './common/interceptors/request-id.interceptor';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+  app.use(cookieParser());
+  app.useGlobalPipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    }),
+  );
+  app.useGlobalInterceptors(new RequestIdInterceptor());
+  app.useGlobalFilters(new AllExceptionsFilter());
+  const allowedOrigins = (process.env.FRONTEND_ORIGIN ?? 'http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  app.enableCors({ origin: allowedOrigins, credentials: true });
+
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('VECTO Logistics API')
+    .setDescription('POD-to-Cash Settlement Engine API')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+  const apiDocument = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('api/docs', app, apiDocument);
+
+  await app.listen(process.env.PORT ?? 3001);
+}
+bootstrap();
+
+
+========== APP MODULE ==========
+FILE: .\src\app.module.ts
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import * as Joi from 'joi';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
+import { AuthModule } from './auth/auth.module';
+import { DispatchModule } from './dispatch/dispatch.module';
+import { DriverModule } from './driver/driver.module';
+import { PrismaModule } from './prisma/prisma.module';
+import { UsersModule } from './users/users.module';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      validationSchema: Joi.object({
+        DATABASE_URL: Joi.string()
+          .uri({ scheme: ['postgres', 'postgresql'] })
+          .required(),
+        JWT_SECRET: Joi.string().min(32).required(),
+        PORT: Joi.number().port().default(3001),
+        FRONTEND_ORIGIN: Joi.string().default('http://localhost:3000'),
+        NODE_ENV: Joi.string()
+          .valid('development', 'test', 'production')
+          .default('development'),
+      }),
+    }),
+    PrismaModule,
+    AuthModule,
+    DispatchModule,
+    DriverModule,
+    UsersModule,
+  ],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+
+
+========== PACKAGE.JSON ==========
+FILE: .\package.json
+{
+  "name": "backend",
+  "version": "0.0.1",
+  "description": "",
+  "author": "",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "nest build",
+    "deploy": "nest deploy",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "start:debug": "nest start --debug --watch",
+    "start:prod": "node dist/main",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "prisma db seed",
+    "lint": "oxlint src/ test/",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch",
+    "test:cov": "jest --coverage",
+    "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
+    "test:e2e": "jest --config ./test/jest-e2e.json"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.2.7",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "^11.2.7",
+    "@nestjs/jwt": "^11.0.2",
+    "@nestjs/platform-express": "^11.2.7",
+    "@nestjs/swagger": "^11.4.7",
+    "@prisma/client": "^6.19.3",
+    "argon2": "^0.41.1",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.4",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^18.0.5",
+    "joi": "^17.13.8",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.24",
+    "@nestjs/mau": "^0.2.6",
+    "@nestjs/schematics": "^11.1.0",
+    "@nestjs/testing": "^11.2.7",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/express": "^5.0.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.0.0",
+    "@types/supertest": "^7.0.0",
+    "jest": "^29.7.0",
+    "oxlint": "^1.58.0",
+    "prettier": "^3.4.2",
+    "prisma": "^6.19.3",
+    "source-map-support": "^0.5.21",
+    "supertest": "^7.0.0",
+    "ts-jest": "^29.4.14",
+    "ts-loader": "^9.5.2",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.9.3"
+  }
+}
+
+prisma\seed.ts:2:import * as argon2 from 'argon2';
+src\auth\auth.module.ts:3:import { JwtModule } from '@nestjs/jwt';
+src\auth\auth.service.spec.ts:2:import { JwtService } from '@nestjs/jwt';
+src\auth\auth.service.ts:3:import { JwtService } from '@nestjs/jwt';
+src\auth\jwt-auth.guard.spec.ts:2:import { JwtService } from '@nestjs/jwt';
+src\auth\jwt-auth.guard.ts:7:import { JwtService } from '@nestjs/jwt';
+src\users\users.service.spec.ts:3:import * as argon2 from 'argon2';
+src\users\users.service.ts:7:import * as argon2 from 'argon2';
+
