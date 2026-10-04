@@ -12,26 +12,17 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCw,
-  Maximize2,
   CheckCircle2,
   XCircle,
   Truck,
   ExternalLink,
-  ChevronRight,
   ShieldCheck,
   Smartphone,
   LayoutDashboard,
-  Filter,
   ArrowRight,
-  Building,
   MapPin,
-  Calendar,
-  Layers,
-  Scale,
-  DollarSign,
   AlertTriangle,
   RefreshCw,
-  Send,
   Eye,
 } from "lucide-react";
 
@@ -65,170 +56,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-// Mock Audit Trip Data
-interface AuditTripItem {
-  id: string;
-  invoiceNo: string;
-  lrNumber: string;
-  regNo: string;
-  driverName: string;
-  driverPhone: string;
-  clientName: string;
-  origin: string;
-  destination: string;
-  departureTime: string;
-  arrivalTime: string;
-  systemGpsDistance: number;
-  odometerDistance: number;
-  // Financials
-  expectedCod: number;
-  reportedCod: number;
-  tripAdvance: number;
-  reportedExpenses: {
-    toll: number;
-    fuel: number;
-    allowance: number;
-  };
-  systemAllowedExpenses: {
-    toll: number;
-    fuel: number;
-    allowance: number;
-  };
-  signatory: {
-    name: string;
-    designation: string;
-    signedAt: string;
-  };
-  status: "Pending" | "Flagged" | "Verified";
-}
-
-const MOCK_AUDIT_QUEUE: AuditTripItem[] = [
-  {
-    id: "TRIP-8842",
-    invoiceNo: "INV-2026-9921",
-    lrNumber: "LR-BLR-8842",
-    regNo: "KA 01 AJ 3319",
-    driverName: "Manjunath S.",
-    driverPhone: "+91 94481 02931",
-    clientName: "Metro Cash & Carry India",
-    origin: "Hosur DC (Tamil Nadu)",
-    destination: "Whitefield Regional DC, Bengaluru",
-    departureTime: "02-Oct-2026 06:30 IST",
-    arrivalTime: "02-Oct-2026 13:45 IST",
-    systemGpsDistance: 132,
-    odometerDistance: 130,
-    expectedCod: 24500,
-    reportedCod: 24500,
-    tripAdvance: 6000,
-    reportedExpenses: {
-      toll: 850,
-      fuel: 2200,
-      allowance: 800,
-    },
-    systemAllowedExpenses: {
-      toll: 850,
-      fuel: 2150,
-      allowance: 800,
-    },
-    signatory: {
-      name: "K. Ramesh",
-      designation: "Warehouse In-Charge, Bay #4",
-      signedAt: "02-Oct-2026 13:50 IST",
-    },
-    status: "Pending",
-  },
-  {
-    id: "TRIP-8841",
-    invoiceNo: "INV-2026-8819",
-    lrNumber: "LR-BHI-4402",
-    regNo: "MH 12 RN 4920",
-    driverName: "Rajesh Kumar",
-    driverPhone: "+91 98231 44021",
-    clientName: "Tata Motors Commercial Parts",
-    origin: "Bhiwandi Hub #4, MH",
-    destination: "Sanand Industrial Park, GJ",
-    departureTime: "01-Oct-2026 18:00 IST",
-    arrivalTime: "02-Oct-2026 11:20 IST",
-    systemGpsDistance: 512,
-    odometerDistance: 510,
-    expectedCod: 48500,
-    reportedCod: 46000, // Discrepancy
-    tripAdvance: 12000,
-    reportedExpenses: {
-      toll: 2850,
-      fuel: 4200,
-      allowance: 1500,
-    },
-    systemAllowedExpenses: {
-      toll: 2850,
-      fuel: 3900,
-      allowance: 1200,
-    },
-    signatory: {
-      name: "Sunil Verma",
-      designation: "Dock Supervisor",
-      signedAt: "02-Oct-2026 11:35 IST",
-    },
-    status: "Flagged",
-  },
-  {
-    id: "TRIP-8846",
-    invoiceNo: "INV-2026-7731",
-    lrNumber: "LR-CHN-1109",
-    regNo: "TN 22 BQ 4109",
-    driverName: "Murugan Selvam",
-    driverPhone: "+91 97890 31284",
-    clientName: "Coimbatore Textile Spares Ltd",
-    origin: "Ennore Port Container Terminal",
-    destination: "Coimbatore ICD, TN",
-    departureTime: "01-Oct-2026 21:00 IST",
-    arrivalTime: "02-Oct-2026 12:15 IST",
-    systemGpsDistance: 490,
-    odometerDistance: 490,
-    expectedCod: 41000,
-    reportedCod: 41000,
-    tripAdvance: 11000,
-    reportedExpenses: {
-      toll: 1950,
-      fuel: 3600,
-      allowance: 1200,
-    },
-    systemAllowedExpenses: {
-      toll: 1950,
-      fuel: 3600,
-      allowance: 1200,
-    },
-    signatory: {
-      name: "P. Murugesan",
-      designation: "Security & Materials Receiving",
-      signedAt: "02-Oct-2026 12:30 IST",
-    },
-    status: "Pending",
-  },
-];
-
-const MOCK_ARCHIVED_TRIPS = [
-  {
-    id: "TRIP-8818",
-    invoiceNo: "INV-2026-6512",
-    clientName: "Metro Cash & Carry India",
-    driverName: "Manjunath S.",
-    route: "Hosur DC → Whitefield DC",
-    resolvedOn: "30-Sep-2026",
-    resolution: "Approved",
-    settlement: 24500,
-  },
-  {
-    id: "TRIP-8809",
-    invoiceNo: "INV-2026-6044",
-    clientName: "Tata Motors Commercial Parts",
-    driverName: "Rajesh Kumar",
-    route: "Bhiwandi Hub → Sanand Plant",
-    resolvedOn: "28-Sep-2026",
-    resolution: "Adjusted",
-    settlement: 46000,
-  },
-];
+import { apiClient, ApiError } from "@/lib/api/client";
 
 interface AuditSettings {
   auditSlaHours: number;
@@ -249,7 +77,6 @@ type AuditToggleSetting = keyof Pick<
   | "notifyAccounts"
 >;
 
-const AUDIT_SETTINGS_KEY = "vecto-audit-settings-demo";
 const DEFAULT_AUDIT_SETTINGS: AuditSettings = {
   auditSlaHours: 2,
   cashVarianceThreshold: 500,
@@ -268,23 +95,49 @@ const AUDIT_TOGGLE_SETTINGS: { key: AuditToggleSetting; label: string; descripti
   { key: "notifyAccounts", label: "Notify accounts on resolution", description: "Notify billing when an audit case is resolved." },
 ];
 
+function formatRupees(amount: number) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function getExpenseAmount(detail: Record<string, unknown> | null, type: "toll" | "fuel" | "allowance"): number | null {
+  if (!detail) return null;
+  if (detail[type] != null && !isNaN(Number(detail[type]))) return Number(detail[type]);
+  const rep = detail.reportedExpenses as Record<string, unknown> | undefined;
+  if (rep && rep[type] != null && !isNaN(Number(rep[type]))) return Number(rep[type]);
+  const exp = detail.expenses;
+  if (exp && typeof exp === "object") {
+    if (Array.isArray(exp)) {
+      const match = exp.find((item: Record<string, unknown>) => String(item.type).toLowerCase() === type);
+      if (match && match.amount != null && !isNaN(Number(match.amount))) return Number(match.amount);
+    } else if (type in exp) {
+      const val = (exp as Record<string, unknown>)[type];
+      if (val != null && !isNaN(Number(val))) return Number(val);
+    }
+  }
+  return null;
+}
+
 export default function InternalAuditWorkspace() {
   const [activeMenu, setActiveMenu] = useState("Audit Queue");
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedTripId, setSelectedTripId] = useState<string>("TRIP-8842");
+
+  // Audit Queue & Trip State
+  const [queue, setQueue] = useState<Array<Record<string, unknown>>>([]);
+  const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
+  const [tripDetail, setTripDetail] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [tripDetailLoading, setTripDetailLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  // Settings State (in-memory)
   const [auditSettings, setAuditSettings] = useState<AuditSettings>(DEFAULT_AUDIT_SETTINGS);
   const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
-      const savedSettings = localStorage.getItem(AUDIT_SETTINGS_KEY);
-      if (savedSettings) {
-        setAuditSettings({ ...DEFAULT_AUDIT_SETTINGS, ...JSON.parse(savedSettings) });
-      }
-    } catch {
-      setSettingsNotice("Saved settings could not be loaded. Defaults are active.");
-    }
-  }, []);
 
   // Document Viewer Controls State
   const [zoomLevel, setZoomLevel] = useState<number>(1);
@@ -299,37 +152,126 @@ export default function InternalAuditWorkspace() {
     podQualityReadable: true,
   });
 
-  // Discrepancy Dialog Modal State
+  // Notes States
+  const [auditNotes, setAuditNotes] = useState("");
+  const [discrepancyNotes, setDiscrepancyNotes] = useState(
+    "Discrepancy detected during audit verification. Consignment flagged for operational review."
+  );
   const [isDisputeModalOpen, setIsDisputeModalOpen] = useState(false);
-  const [discrepancyReason, setDiscrepancyReason] = useState(
-    "Cash collected has a deficit of ₹2,500 against the expected billing invoice. Fuel expense receipt missing official pump slip."
-  );
 
-  // Selected Trip Lookup
-  const activeTrip = useMemo(() => {
-    return (
-      MOCK_AUDIT_QUEUE.find((t) => t.id === selectedTripId) ||
-      MOCK_AUDIT_QUEUE[0]
-    );
+  // Initial Fetch of Queue
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiClient.get<{ data: Array<Record<string, unknown>> }>("/audits/queue");
+        if (!cancelled) {
+          setQueue(res.data);
+          if (res.data.length > 0) {
+            setSelectedTripId(String(res.data[0].tripId || res.data[0].id));
+          }
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof ApiError ? err.message : "Failed to load audit queue");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Fetch Trip Detail when selectedTripId changes
+  useEffect(() => {
+    if (!selectedTripId) return;
+    let cancelled = false;
+    setTripDetailLoading(true);
+    (async () => {
+      try {
+        const res = await apiClient.get(`/trips/${selectedTripId}`);
+        if (!cancelled) {
+          const data =
+            res && typeof res === "object" && "data" in res && (res as { data: unknown }).data && typeof (res as { data: unknown }).data === "object"
+              ? ((res as { data: Record<string, unknown> }).data as Record<string, unknown>)
+              : (res as Record<string, unknown>);
+          setTripDetail(data);
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof ApiError ? err.message : "Failed to load trip");
+      } finally {
+        if (!cancelled) setTripDetailLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedTripId]);
-  const flaggedTrips = MOCK_AUDIT_QUEUE.filter((trip) => trip.status === "Flagged");
-  const visibleDisputes = flaggedTrips.filter((trip) =>
-    `${trip.id} ${trip.invoiceNo} ${trip.lrNumber} ${trip.driverName} ${trip.clientName}`
-      .toLowerCase()
-      .includes(searchQuery.trim().toLowerCase())
-  );
-  const visibleQueueTrips = MOCK_AUDIT_QUEUE.filter((trip) =>
-    `${trip.id} ${trip.invoiceNo} ${trip.lrNumber} ${trip.driverName} ${trip.clientName}`
-      .toLowerCase()
-      .includes(searchQuery.trim().toLowerCase())
-  );
-  const visibleArchivedTrips = MOCK_ARCHIVED_TRIPS.filter((trip) =>
-    `${trip.id} ${trip.invoiceNo} ${trip.driverName} ${trip.clientName} ${trip.route}`
-      .toLowerCase()
-      .includes(searchQuery.trim().toLowerCase())
-  );
-  const selectedDispute =
-    flaggedTrips.find((trip) => trip.id === selectedTripId) ?? flaggedTrips[0];
+
+  const refetchQueueAndSelectNext = async (currentId?: string | null) => {
+    try {
+      const res = await apiClient.get<{ data: Array<Record<string, unknown>> }>("/audits/queue");
+      setQueue(res.data);
+      if (res.data.length > 0) {
+        if (currentId) {
+          const remaining = res.data.filter((q) => String(q.tripId || q.id) !== currentId);
+          if (remaining.length > 0) {
+            setSelectedTripId(String(remaining[0].tripId || remaining[0].id));
+          } else {
+            setSelectedTripId(String(res.data[0].tripId || res.data[0].id));
+          }
+        } else {
+          setSelectedTripId(String(res.data[0].tripId || res.data[0].id));
+        }
+      } else {
+        setSelectedTripId(null);
+        setTripDetail(null);
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to refresh audit queue");
+    }
+  };
+
+  // Actions
+  const handleVerifyAndApprove = async () => {
+    if (!selectedTripId) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      await apiClient.post(`/trips/${selectedTripId}/audit`, {
+        outcome: "AUDITED",
+        notes: auditNotes,
+        checklist: checklist,
+      });
+      setActionNotice(`Trip ${selectedTripId} verified and forwarded to Billing.`);
+      await refetchQueueAndSelectNext(selectedTripId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to verify trip");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleConfirmDiscrepancy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTripId) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      await apiClient.post(`/trips/${selectedTripId}/audit`, {
+        outcome: "CORRECTION_REQUESTED",
+        notes: discrepancyNotes,
+        checklist,
+      });
+      setIsDisputeModalOpen(false);
+      setActionNotice(`Discrepancy logged for trip ${selectedTripId}. Flagged for review.`);
+      await refetchQueueAndSelectNext(selectedTripId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to raise discrepancy");
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   // Document Controls
   const handleZoomIn = () => setZoomLevel((prev) => Math.min(prev + 0.25, 2.5));
@@ -340,60 +282,135 @@ export default function InternalAuditWorkspace() {
     setRotation(0);
   };
 
-  // Toggle Checklist item
   const toggleCheck = (key: keyof typeof checklist) => {
     setChecklist((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // Financial calculations
-  const totalReportedExp =
-    activeTrip.reportedExpenses.toll +
-    activeTrip.reportedExpenses.fuel +
-    activeTrip.reportedExpenses.allowance;
-  const totalAllowedExp =
-    activeTrip.systemAllowedExpenses.toll +
-    activeTrip.systemAllowedExpenses.fuel +
-    activeTrip.systemAllowedExpenses.allowance;
-  const expenseVariance = totalReportedExp - totalAllowedExp;
-  const cashDeficit = activeTrip.reportedCod - activeTrip.expectedCod;
-
-  // Actions
-  const handleVerifyAndApprove = () => {
-    alert(
-      `✓ APPROVED: ${activeTrip.id} (${activeTrip.invoiceNo}) verified by Internal Audit!\nVoucher sent to Accounts Payable & Automated Billing Batch #289.`
-    );
-  };
-
-  const handleConfirmDiscrepancy = (e: React.FormEvent) => {
-    e.preventDefault();
-    alert(
-      `⚠ DISCREPANCY LOGGED for ${activeTrip.id}!\nReason: ${discrepancyReason}\nTrip marked as FLAGGED and reassigned to Dispatch Dispute Desk.`
-    );
-    setIsDisputeModalOpen(false);
-  };
-
   const handleSaveSettings = () => {
-    try {
-      localStorage.setItem(AUDIT_SETTINGS_KEY, JSON.stringify(auditSettings));
-      setSettingsNotice("Settings saved in this browser.");
-    } catch {
-      setSettingsNotice("Settings could not be saved in this browser.");
-    }
+    setSettingsNotice("Settings updated for this session.");
   };
 
   const handleResetSettings = () => {
     setAuditSettings(DEFAULT_AUDIT_SETTINGS);
-    try {
-      localStorage.removeItem(AUDIT_SETTINGS_KEY);
-      setSettingsNotice("Default settings restored.");
-    } catch {
-      setSettingsNotice("Defaults restored for this session.");
-    }
+    setSettingsNotice("Default settings restored.");
   };
+
+  // Filter queue trips by search query
+  const visibleQueueTrips = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return queue;
+    return queue.filter((trip) => {
+      const tripId = String(trip.tripId || trip.id || "");
+      const tripNumber = String(trip.tripNumber || "");
+      const client = String(trip.client || trip.clientName || "");
+      const status = String(trip.status || "");
+      return `${tripId} ${tripNumber} ${client} ${status}`.toLowerCase().includes(q);
+    });
+  }, [queue, searchQuery]);
+
+  const flaggedTrips = useMemo(() => {
+    return queue.filter((t) => {
+      const s = String(t.status || "").toLowerCase();
+      return s.includes("flag") || s.includes("dispute") || s.includes("correction");
+    });
+  }, [queue]);
+
+  const selectedDispute = useMemo(() => {
+    return (
+      flaggedTrips.find((t) => String(t.tripId || t.id) === selectedTripId) ||
+      flaggedTrips[0] ||
+      null
+    );
+  }, [flaggedTrips, selectedTripId]);
+
+  // Derived Values from tripDetail (Rule 10)
+  const tripNumberDisplay = tripDetail?.tripNumber
+    ? String(tripDetail.tripNumber)
+    : tripDetail?.id
+    ? String(tripDetail.id)
+    : selectedTripId || "—";
+  const vehicleRegDisplay = tripDetail?.vehicle
+    ? String(tripDetail.vehicle)
+    : tripDetail?.regNo
+    ? String(tripDetail.regNo)
+    : "—";
+  const driverNameDisplay = tripDetail?.driver
+    ? String(tripDetail.driver)
+    : tripDetail?.driverName
+    ? String(tripDetail.driverName)
+    : "—";
+  const driverPhoneDisplay = tripDetail?.driverPhone
+    ? String(tripDetail.driverPhone)
+    : tripDetail?.phone
+    ? String(tripDetail.phone)
+    : "—";
+  const clientNameDisplay = tripDetail?.client
+    ? String(tripDetail.client)
+    : tripDetail?.clientName
+    ? String(tripDetail.clientName)
+    : "—";
+  const originDisplay = tripDetail?.origin ? String(tripDetail.origin) : "—";
+  const destinationDisplay = tripDetail?.destination ? String(tripDetail.destination) : "—";
+  const departureDisplay = tripDetail?.departureTime ? String(tripDetail.departureTime) : "—";
+  const arrivalDisplay = tripDetail?.eta
+    ? String(tripDetail.eta)
+    : tripDetail?.arrivalTime
+    ? String(tripDetail.arrivalTime)
+    : "—";
+  const invoiceNoDisplay = tripDetail?.invoiceNo
+    ? String(tripDetail.invoiceNo)
+    : tripDetail?.tripNumber
+    ? `INV-${String(tripDetail.tripNumber)}`
+    : "—";
+  const signatoryNameDisplay = tripDetail?.signatoryName
+    ? String(tripDetail.signatoryName)
+    : tripDetail?.receiverName
+    ? String(tripDetail.receiverName)
+    : "—";
+
+  // Odometer and Distances
+  const startOdometer = tripDetail?.startOdometer != null ? Number(tripDetail.startOdometer) : null;
+  const currentOdometer =
+    tripDetail?.currentOdometer != null
+      ? Number(tripDetail.currentOdometer)
+      : tripDetail?.endOdometer != null
+      ? Number(tripDetail.endOdometer)
+      : null;
+  const odometerDistance =
+    startOdometer != null && currentOdometer != null ? currentOdometer - startOdometer : null;
+  const gpsDistance =
+    tripDetail?.systemGpsDistance != null
+      ? Number(tripDetail.systemGpsDistance)
+      : tripDetail?.distanceKm != null
+      ? Number(tripDetail.distanceKm)
+      : null;
+
+  // Expenses & Cash
+  const tollReported = getExpenseAmount(tripDetail, "toll");
+  const fuelReported = getExpenseAmount(tripDetail, "fuel");
+  const allowanceReported = getExpenseAmount(tripDetail, "allowance");
+
+  const expectedCod =
+    tripDetail?.expectedCollection != null
+      ? Number(tripDetail.expectedCollection)
+      : tripDetail?.expectedCod != null
+      ? Number(tripDetail.expectedCod)
+      : null;
+  const collectedCod =
+    tripDetail?.actualCash != null
+      ? Number(tripDetail.actualCash)
+      : tripDetail?.collectedCash != null
+      ? Number(tripDetail.collectedCash)
+      : tripDetail?.reportedCod != null
+      ? Number(tripDetail.reportedCod)
+      : null;
+
+  const cashDeficit =
+    expectedCod != null && collectedCod != null ? collectedCod - expectedCod : null;
 
   return (
     <div className="flex h-screen w-full bg-slate-50 text-slate-800 font-sans antialiased overflow-hidden">
-      {/* 1. LEFT SIDEBAR (Brand-Consistent with Dispatch) */}
+      {/* 1. LEFT SIDEBAR */}
       <aside className="w-64 flex-shrink-0 flex flex-col border-r border-slate-200 bg-white">
         {/* Brand / Logo */}
         <div className="h-14 border-b border-slate-200 px-5 flex items-center justify-between">
@@ -431,8 +448,8 @@ export default function InternalAuditWorkspace() {
         {/* Navigation Menu */}
         <nav className="px-3 py-4 space-y-1">
           {[
-            { name: "Audit Queue", icon: FileCheck2, badge: "45" },
-            { name: "Dispute Resolutions", icon: AlertOctagon, badge: "12" },
+            { name: "Audit Queue", icon: FileCheck2, badge: queue.length > 0 ? String(queue.length) : null },
+            { name: "Dispute Resolutions", icon: AlertOctagon, badge: flaggedTrips.length > 0 ? String(flaggedTrips.length) : null },
             { name: "Archived Trips", icon: Archive, badge: null },
             { name: "Settings", icon: Settings, badge: null },
           ].map((item) => {
@@ -444,7 +461,7 @@ export default function InternalAuditWorkspace() {
                 onClick={() => {
                   setActiveMenu(item.name);
                   if (item.name === "Dispute Resolutions" && flaggedTrips[0]) {
-                    setSelectedTripId(flaggedTrips[0].id);
+                    setSelectedTripId(String(flaggedTrips[0].tripId || flaggedTrips[0].id));
                   }
                 }}
                 className={`w-full flex items-center space-x-3 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
@@ -479,38 +496,58 @@ export default function InternalAuditWorkspace() {
             Active Review Queue
           </span>
           <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
-            {visibleQueueTrips.map((trip) => (
-              <button
-                key={trip.id}
-                onClick={() => setSelectedTripId(trip.id)}
-                className={`w-full text-left p-2 rounded-md border text-xs transition-all ${
-                  selectedTripId === trip.id
-                    ? "bg-slate-100 border-slate-400 font-semibold text-slate-900"
-                    : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-[11px] font-bold text-slate-800">
-                    {trip.id}
-                  </span>
-                  <Badge
-                    variant="outline"
-                    className={`text-[9px] px-1 py-0 ${
-                      trip.status === "Flagged"
-                        ? "bg-red-50 text-red-700 border-red-200"
-                        : "bg-amber-50 text-amber-700 border-amber-200"
+            {loading ? (
+              <div className="space-y-1.5 p-1">
+                <div className="h-10 rounded-md bg-slate-100 animate-pulse" />
+                <div className="h-10 rounded-md bg-slate-100 animate-pulse" />
+                <div className="h-10 rounded-md bg-slate-100 animate-pulse" />
+              </div>
+            ) : queue.length === 0 ? (
+              <p className="px-2 py-4 text-center text-[11px] text-slate-500">
+                No trips pending audit.
+              </p>
+            ) : (
+              visibleQueueTrips.map((tripItem) => {
+                const tripIdStr = String(tripItem.tripId || tripItem.id || "");
+                const isSelected = selectedTripId === tripIdStr;
+                const statusStr = String(tripItem.status || "PENDING");
+                return (
+                  <button
+                    key={tripIdStr}
+                    onClick={() => setSelectedTripId(tripIdStr)}
+                    className={`w-full text-left p-2 rounded-md border text-xs transition-all ${
+                      isSelected
+                        ? "bg-slate-100 border-slate-400 font-semibold text-slate-900"
+                        : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
                     }`}
                   >
-                    {trip.status}
-                  </Badge>
-                </div>
-                <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                  {trip.clientName}
-                </div>
-              </button>
-            ))}
-            {visibleQueueTrips.length === 0 && (
-              <p className="px-2 py-4 text-center text-[11px] text-slate-500">No trips match your search.</p>
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-[11px] font-bold text-slate-800">
+                        {String(tripItem.tripNumber || tripIdStr)}
+                      </span>
+                      <Badge
+                        variant="outline"
+                        className={`text-[9px] px-1 py-0 uppercase ${
+                          statusStr.toLowerCase().includes("flag") ||
+                          statusStr.toLowerCase().includes("dispute")
+                            ? "bg-red-50 text-red-700 border-red-200"
+                            : "bg-amber-50 text-amber-700 border-amber-200"
+                        }`}
+                      >
+                        {statusStr}
+                      </Badge>
+                    </div>
+                    <div className="text-[11px] text-slate-500 truncate mt-0.5">
+                      {String(tripItem.client || tripItem.clientName || "Consignee Client")}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+            {!loading && queue.length > 0 && visibleQueueTrips.length === 0 && (
+              <p className="px-2 py-4 text-center text-[11px] text-slate-500">
+                No trips match your search.
+              </p>
             )}
           </div>
         </div>
@@ -561,7 +598,7 @@ export default function InternalAuditWorkspace() {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
             <Input
               type="text"
-              placeholder="Search Trip ID, Invoice, Driver, LR No..."
+              placeholder="Search Trip ID, Invoice, Driver, Client..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="h-8 pl-8 text-xs bg-slate-50/50 border-slate-200 focus-visible:bg-white"
@@ -575,9 +612,9 @@ export default function InternalAuditWorkspace() {
               className="bg-slate-50 border-slate-200 text-slate-700 font-mono text-xs px-2.5 py-1 flex items-center gap-1.5"
             >
               <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-              <span className="font-semibold text-slate-900">45 Pending Audits</span>
+              <span className="font-semibold text-slate-900">{queue.length} Pending Audits</span>
               <span className="text-slate-300">|</span>
-              <span className="text-red-600 font-semibold">12 Flagged</span>
+              <span className="text-red-600 font-semibold">{flaggedTrips.length} Flagged</span>
             </Badge>
 
             <span className="text-xs text-slate-500 font-mono">
@@ -585,6 +622,38 @@ export default function InternalAuditWorkspace() {
             </span>
           </div>
         </header>
+
+        {/* Error State Banner */}
+        {error && (
+          <div className="mx-6 mt-3 p-3 bg-red-50 border-2 border-red-300 rounded-lg text-red-900 text-xs font-semibold flex items-center justify-between flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-red-600 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+            <button
+              onClick={() => setError(null)}
+              className="text-red-700 hover:text-red-900 text-xs font-bold underline ml-3"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Action Success Notification */}
+        {actionNotice && (
+          <div className="mx-6 mt-3 p-3 bg-emerald-50 border-2 border-emerald-300 rounded-lg text-emerald-900 text-xs font-semibold flex items-center justify-between flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+              <span>{actionNotice}</span>
+            </div>
+            <button
+              onClick={() => setActionNotice(null)}
+              className="text-emerald-700 hover:text-emerald-900 text-xs font-bold underline ml-3"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {activeMenu === "Settings" ? (
           <div className="flex-1 overflow-y-auto bg-slate-50 p-5 sm:p-7">
@@ -594,13 +663,17 @@ export default function InternalAuditWorkspace() {
                   <Settings className="h-3.5 w-3.5" /> AUDIT CONFIGURATION
                 </div>
                 <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
-                <p className="mt-1 text-xs text-slate-600">Configure review thresholds and evidence requirements for this demo workspace.</p>
+                <p className="mt-1 text-xs text-slate-600">
+                  Configure review thresholds and evidence requirements for audit governance.
+                </p>
               </div>
 
               <Card className="border-slate-200 bg-white shadow-none">
                 <CardHeader className="border-b border-slate-200 p-4">
                   <CardTitle className="text-sm font-bold text-slate-900">Review policy</CardTitle>
-                  <CardDescription className="mt-1 text-[11px]">Set the audit response window and COD variance limit.</CardDescription>
+                  <CardDescription className="mt-1 text-[11px]">
+                    Set the audit response window and COD variance limit.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="grid gap-4 p-4 sm:grid-cols-2">
                   <label className="grid gap-2 text-xs font-semibold text-slate-700" htmlFor="audit-sla">
@@ -611,7 +684,12 @@ export default function InternalAuditWorkspace() {
                       min={1}
                       max={24}
                       value={auditSettings.auditSlaHours}
-                      onChange={(event) => setAuditSettings((current) => ({ ...current, auditSlaHours: Math.min(24, Math.max(1, Number(event.target.value) || 1)) }))}
+                      onChange={(event) =>
+                        setAuditSettings((current) => ({
+                          ...current,
+                          auditSlaHours: Math.min(24, Math.max(1, Number(event.target.value) || 1)),
+                        }))
+                      }
                       className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-xs font-normal text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                     />
                   </label>
@@ -623,7 +701,12 @@ export default function InternalAuditWorkspace() {
                       min={0}
                       step={100}
                       value={auditSettings.cashVarianceThreshold}
-                      onChange={(event) => setAuditSettings((current) => ({ ...current, cashVarianceThreshold: Math.max(0, Number(event.target.value) || 0) }))}
+                      onChange={(event) =>
+                        setAuditSettings((current) => ({
+                          ...current,
+                          cashVarianceThreshold: Math.max(0, Number(event.target.value) || 0),
+                        }))
+                      }
                       className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-xs font-normal text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                     />
                   </label>
@@ -645,7 +728,9 @@ export default function InternalAuditWorkspace() {
                       <input
                         type="checkbox"
                         checked={auditSettings[setting.key]}
-                        onChange={(event) => setAuditSettings((current) => ({ ...current, [setting.key]: event.target.checked }))}
+                        onChange={(event) =>
+                          setAuditSettings((current) => ({ ...current, [setting.key]: event.target.checked }))
+                        }
                         className="h-4 w-4 shrink-0 accent-blue-600"
                       />
                     </label>
@@ -654,7 +739,9 @@ export default function InternalAuditWorkspace() {
               </Card>
 
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="m-0 text-[10px] text-slate-500" role="status" aria-live="polite">{settingsNotice ?? "Changes are saved only when you select Save settings."}</p>
+                <p className="m-0 text-[10px] text-slate-500" role="status" aria-live="polite">
+                  {settingsNotice ?? "Changes are saved only for this active browser session."}
+                </p>
                 <div className="flex items-center gap-2">
                   <Button type="button" variant="outline" onClick={handleResetSettings} className="border-slate-300 text-slate-700">
                     <RefreshCw className="mr-2 h-3.5 w-3.5" /> Reset defaults
@@ -664,7 +751,6 @@ export default function InternalAuditWorkspace() {
                   </Button>
                 </div>
               </div>
-              <p className="text-[10px] text-slate-500">These demo preferences are stored in this browser and do not update backend policy.</p>
             </div>
           </div>
         ) : activeMenu === "Dispute Resolutions" ? (
@@ -676,7 +762,7 @@ export default function InternalAuditWorkspace() {
                     <AlertOctagon className="h-3.5 w-3.5" /> VARIANCE MANAGEMENT
                   </div>
                   <h1 className="text-2xl font-bold text-slate-900">Dispute Resolutions</h1>
-                  <p className="mt-1 text-xs text-slate-600">Review flagged trips, compare reported values, and return to the supporting evidence.</p>
+                  <p className="mt-1 text-xs text-slate-600">Review flagged trips, compare reported values, and inspect evidence.</p>
                 </div>
                 <Badge variant="outline" className="flex items-center gap-1.5 border-red-200 bg-red-50 text-red-700">
                   <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
@@ -694,35 +780,36 @@ export default function InternalAuditWorkspace() {
                     <AlertOctagon className="h-4 w-4 text-red-500" />
                   </CardHeader>
                   <CardContent className="space-y-2 p-3">
-                    {visibleDisputes.map((trip) => {
-                      const cashShortfall = Math.max(trip.expectedCod - trip.reportedCod, 0);
-                      const expenseVariance =
-                        trip.reportedExpenses.toll + trip.reportedExpenses.fuel + trip.reportedExpenses.allowance -
-                        trip.systemAllowedExpenses.toll - trip.systemAllowedExpenses.fuel - trip.systemAllowedExpenses.allowance;
-                      const isSelected = selectedDispute?.id === trip.id;
+                    {flaggedTrips.map((trip) => {
+                      const tripIdStr = String(trip.tripId || trip.id || "");
+                      const isSelected = selectedDispute && String(selectedDispute.tripId || selectedDispute.id) === tripIdStr;
                       return (
                         <button
-                          key={trip.id}
+                          key={tripIdStr}
                           type="button"
-                          onClick={() => setSelectedTripId(trip.id)}
+                          onClick={() => setSelectedTripId(tripIdStr)}
                           aria-pressed={isSelected}
-                          className={`w-full rounded-lg border p-3 text-left transition-colors ${isSelected ? "border-blue-300 bg-blue-50/60" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+                          className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                            isSelected ? "border-blue-300 bg-blue-50/60" : "border-slate-200 bg-white hover:bg-slate-50"
+                          }`}
                         >
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="font-mono text-xs font-bold text-slate-900">{trip.id}</span>
+                            <span className="font-mono text-xs font-bold text-slate-900">
+                              {String(trip.tripNumber || tripIdStr)}
+                            </span>
                             <Badge variant="outline" className="border-red-200 bg-red-50 text-[9px] text-red-700">Flagged</Badge>
                           </div>
-                          <div className="mt-2 text-xs font-semibold text-slate-800">{trip.clientName}</div>
-                          <div className="mt-1 text-[10px] text-slate-500">{trip.invoiceNo} <span className="mx-1">·</span> {trip.driverName}</div>
-                          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 border-t border-slate-200/70 pt-2 text-[10px]">
-                            <span className="text-slate-600">COD shortfall <strong className="ml-1 text-red-700">₹{cashShortfall.toLocaleString("en-IN")}</strong></span>
-                            <span className="text-slate-600">Expense variance <strong className={`ml-1 ${expenseVariance > 0 ? "text-amber-700" : "text-emerald-700"}`}>{expenseVariance > 0 ? "+" : ""}₹{expenseVariance.toLocaleString("en-IN")}</strong></span>
+                          <div className="mt-2 text-xs font-semibold text-slate-800">
+                            {String(trip.client || trip.clientName || "Consignee Client")}
+                          </div>
+                          <div className="mt-1 text-[10px] text-slate-500">
+                            Status: {String(trip.status || "Flagged")}
                           </div>
                         </button>
                       );
                     })}
-                    {visibleDisputes.length === 0 && (
-                      <div className="px-4 py-10 text-center text-xs text-slate-500">No disputes match this search.</div>
+                    {flaggedTrips.length === 0 && (
+                      <div className="px-4 py-10 text-center text-xs text-slate-500">No disputes in queue.</div>
                     )}
                   </CardContent>
                 </Card>
@@ -733,26 +820,23 @@ export default function InternalAuditWorkspace() {
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <CardDescription className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Selected case</CardDescription>
-                          <CardTitle className="mt-1 text-base font-bold text-slate-900">{selectedDispute.id}</CardTitle>
+                          <CardTitle className="mt-1 text-base font-bold text-slate-900">
+                            {String(selectedDispute.tripNumber || selectedDispute.tripId || selectedDispute.id)}
+                          </CardTitle>
                         </div>
                         <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">Requires resolution</Badge>
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-4 p-4">
                       <div className="grid grid-cols-2 gap-3 text-xs">
-                        <div><span className="block text-[10px] text-slate-500">Invoice</span><span className="mt-1 block font-mono font-semibold text-slate-800">{selectedDispute.invoiceNo}</span></div>
-                        <div><span className="block text-[10px] text-slate-500">Vehicle</span><span className="mt-1 block font-mono font-semibold text-slate-800">{selectedDispute.regNo}</span></div>
-                        <div><span className="block text-[10px] text-slate-500">Expected COD</span><span className="mt-1 block font-semibold text-slate-800">₹{selectedDispute.expectedCod.toLocaleString("en-IN")}</span></div>
-                        <div><span className="block text-[10px] text-slate-500">Reported COD</span><span className="mt-1 block font-semibold text-slate-800">₹{selectedDispute.reportedCod.toLocaleString("en-IN")}</span></div>
-                      </div>
-                      <div className="rounded-md border border-red-200 bg-red-50/60 p-3">
-                        <div className="text-[10px] font-bold uppercase tracking-wide text-red-800">Cash variance</div>
-                        <div className="mt-1 text-lg font-bold text-red-700">-₹{Math.max(selectedDispute.expectedCod - selectedDispute.reportedCod, 0).toLocaleString("en-IN")}</div>
-                        <p className="mb-0 mt-1 text-[10px] leading-4 text-red-800">Reported remittance is below the expected COD amount. Verify the POD and expense evidence before closing this case.</p>
+                        <div><span className="block text-[10px] text-slate-500">Client</span><span className="mt-1 block font-semibold text-slate-800">{String(selectedDispute.client || "—")}</span></div>
+                        <div><span className="block text-[10px] text-slate-500">Status</span><span className="mt-1 block font-mono font-semibold text-slate-800">{String(selectedDispute.status || "—")}</span></div>
                       </div>
                       <div className="flex items-start gap-2 text-[11px] text-slate-600">
                         <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-600" />
-                        <span>{selectedDispute.origin} <ArrowRight className="mx-1 inline h-3 w-3" /> {selectedDispute.destination}</span>
+                        <span>
+                          {String(selectedDispute.origin || "Origin")} <ArrowRight className="mx-1 inline h-3 w-3" /> {String(selectedDispute.destination || "Destination")}
+                        </span>
                       </div>
                       <Button type="button" onClick={() => setActiveMenu("Audit Queue")} className="w-full bg-slate-900 text-white hover:bg-slate-800">
                         <Eye className="mr-2 h-4 w-4" /> Review evidence
@@ -776,570 +860,565 @@ export default function InternalAuditWorkspace() {
                     <Archive className="h-3.5 w-3.5" /> AUDIT HISTORY
                   </div>
                   <h1 className="text-2xl font-bold text-slate-900">Archived Trips &amp; Resolutions</h1>
-                  <p className="mt-1 text-xs text-slate-600">Completed audit cases and their final settlement outcomes.</p>
+                  <p className="mt-1 text-xs text-slate-600">Completed audit cases and their settlement outcomes.</p>
                 </div>
-                <Badge variant="outline" className="border-slate-200 bg-white text-slate-700">
-                  {visibleArchivedTrips.length} records
-                </Badge>
               </div>
 
               <Card className="overflow-hidden border-slate-200 bg-white shadow-none">
                 <CardHeader className="border-b border-slate-200 p-4">
                   <CardTitle className="text-sm font-bold text-slate-900">Resolution history</CardTitle>
-                  <CardDescription className="mt-1 text-[11px]">Search by trip, invoice, driver, client, or route using the header search.</CardDescription>
+                  <CardDescription className="mt-1 text-[11px]">Trips cleared through audit</CardDescription>
                 </CardHeader>
-                <CardContent className="p-0">
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader className="bg-slate-50/75 text-[10px]">
-                        <TableRow>
-                          <TableHead>Trip / Invoice</TableHead>
-                          <TableHead>Client / Driver</TableHead>
-                          <TableHead>Route</TableHead>
-                          <TableHead>Resolved</TableHead>
-                          <TableHead>Outcome</TableHead>
-                          <TableHead className="text-right">Settlement</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody className="text-xs">
-                        {visibleArchivedTrips.map((trip) => (
-                          <TableRow key={trip.id}>
-                            <TableCell>
-                              <span className="block font-mono font-bold text-slate-900">{trip.id}</span>
-                              <span className="mt-1 block text-[10px] text-slate-500">{trip.invoiceNo}</span>
-                            </TableCell>
-                            <TableCell>
-                              <span className="block font-medium text-slate-800">{trip.clientName}</span>
-                              <span className="mt-1 block text-[10px] text-slate-500">{trip.driverName}</span>
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap text-slate-600">{trip.route}</TableCell>
-                            <TableCell className="whitespace-nowrap text-slate-600">{trip.resolvedOn}</TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={trip.resolution === "Adjusted" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}>
-                                {trip.resolution}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right font-mono font-semibold text-slate-800">₹{trip.settlement.toLocaleString("en-IN")}</TableCell>
-                          </TableRow>
-                        ))}
-                        {visibleArchivedTrips.length === 0 && (
-                          <TableRow>
-                            <TableCell colSpan={6} className="py-12 text-center text-xs text-slate-500">No archived trips match your search.</TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
+                <CardContent className="p-12 text-center text-xs text-slate-500">
+                  No archived audit records found.
                 </CardContent>
               </Card>
-              <p className="text-[10px] text-slate-500">Sample archive records for this demo workspace.</p>
             </div>
           </div>
         ) : (
-        /* 3. MAIN CONTENT: SPLIT-PANE DOCUMENT REVIEW LAYOUT (50/50) */
-        <div className="flex-1 grid grid-cols-12 overflow-hidden">
-          
-          {/* ========================================================================= */}
-          {/* LEFT PANE: VISUAL PROOF (THE DOCUMENT VIEWER) - 6 Cols (50%) */}
-          {/* ========================================================================= */}
-          <section className="col-span-6 border-r border-slate-200 bg-slate-100 flex flex-col h-full overflow-hidden">
-            {/* Document Viewer Toolbar */}
-            <div className="h-11 px-4 border-b border-slate-200 bg-white flex items-center justify-between flex-shrink-0">
-              <div className="flex items-center space-x-2">
-                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <Eye className="h-3.5 w-3.5 text-slate-600" />
-                  Proof of Delivery: <span className="font-mono text-blue-700">{activeTrip.lrNumber}</span>
-                </span>
-                <span className="text-[11px] text-slate-600 font-mono">
-                  ({Math.round(zoomLevel * 100)}% • {rotation}°)
-                </span>
-              </div>
-
-              {/* Document Controls */}
-              <div className="flex items-center space-x-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleZoomIn}
-                  className="h-7 w-7 p-0 border-slate-200 text-slate-700 hover:bg-slate-100"
-                  title="Zoom In"
-                >
-                  <ZoomIn className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleZoomOut}
-                  className="h-7 w-7 p-0 border-slate-200 text-slate-700 hover:bg-slate-100"
-                  title="Zoom Out"
-                  disabled={zoomLevel <= 0.75}
-                >
-                  <ZoomOut className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleRotate}
-                  className="h-7 w-7 p-0 border-slate-200 text-slate-700 hover:bg-slate-100"
-                  title="Rotate 90°"
-                >
-                  <RotateCw className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleResetDoc}
-                  className="h-7 px-2 text-[10px] font-mono border-slate-200 text-slate-700 hover:bg-slate-100"
-                  title="Reset View"
-                >
-                  Reset
-                </Button>
-              </div>
-            </div>
-
-            {/* Document Canvas Area */}
-            <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-200/70">
-              <div
-                style={{
-                  transform: `scale(${zoomLevel}) rotate(${rotation}deg)`,
-                  transition: "transform 0.15s ease-out",
-                  transformOrigin: "center center",
-                }}
-                className="w-[430px] bg-white rounded-md shadow-md border border-slate-300 p-6 text-slate-800 text-[11px] select-none"
-              >
-                {/* Simulated Physical Lorry Receipt Header */}
-                <div className="border-b-2 border-slate-900 pb-3 mb-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="font-black text-sm text-slate-900 tracking-wider">
-                        VECTO 3PL CARRIERS LTD.
-                      </h4>
-                      <p className="text-[9px] text-slate-500 uppercase font-mono">
-                        Consignment Note / Lorry Receipt (Consignee Copy)
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <span className="font-mono font-bold text-xs block text-slate-900">
-                        {activeTrip.lrNumber}
-                      </span>
-                      <span className="text-[9px] text-slate-500 font-mono">
-                        Date: 02-Oct-2026
-                      </span>
-                    </div>
-                  </div>
+          /* 3. MAIN CONTENT: SPLIT-PANE DOCUMENT REVIEW LAYOUT (50/50) */
+          <div className="flex-1 grid grid-cols-12 overflow-hidden">
+            {/* ========================================================================= */}
+            {/* LEFT PANE: VISUAL PROOF (THE DOCUMENT VIEWER) - 6 Cols (50%) */}
+            {/* ========================================================================= */}
+            <section className="col-span-6 border-r border-slate-200 bg-slate-100 flex flex-col h-full overflow-hidden">
+              {/* Document Viewer Toolbar */}
+              <div className="h-11 px-4 border-b border-slate-200 bg-white flex items-center justify-between flex-shrink-0">
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Eye className="h-3.5 w-3.5 text-slate-600" />
+                    Proof of Delivery: <span className="font-mono text-blue-700">{tripNumberDisplay}</span>
+                  </span>
+                  <span className="text-[11px] text-slate-600 font-mono">
+                    ({Math.round(zoomLevel * 100)}% • {rotation}°)
+                  </span>
                 </div>
 
-                {/* LR Grid Data */}
-                <div className="grid grid-cols-2 gap-2 border border-slate-300 p-2.5 rounded bg-slate-50/50 mb-3">
-                  <div>
-                    <span className="text-[9px] text-slate-600 block uppercase font-bold">
-                      Consignor (Sender)
-                    </span>
-                    <span className="font-bold text-slate-800 block truncate">
-                      Vecto DC - Hub #4
-                    </span>
-                    <span className="text-[10px] text-slate-600">{activeTrip.origin}</span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-slate-600 block uppercase font-bold">
-                      Consignee (Receiver)
-                    </span>
-                    <span className="font-bold text-slate-800 block truncate">
-                      {activeTrip.clientName}
-                    </span>
-                    <span className="text-[10px] text-slate-600">
-                      {activeTrip.destination}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 border border-slate-300 p-2 rounded bg-slate-50/50 text-[10px] font-mono mb-3">
-                  <div>
-                    <span className="text-[9px] text-slate-600 block uppercase font-bold">
-                      Truck No
-                    </span>
-                    <span className="font-bold text-slate-900">{activeTrip.regNo}</span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-slate-600 block uppercase font-bold">
-                      Invoice No
-                    </span>
-                    <span className="font-bold text-slate-900">{activeTrip.invoiceNo}</span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-slate-600 block uppercase font-bold">
-                      COD Value
-                    </span>
-                    <span className="font-bold text-slate-900">
-                      ₹{activeTrip.expectedCod.toLocaleString("en-IN")}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Material Table Preview */}
-                <table className="w-full text-[10px] border border-slate-300 mb-3 text-left">
-                  <thead className="bg-slate-100 border-b border-slate-300 font-semibold">
-                    <tr>
-                      <th className="p-1">Item / Pkg</th>
-                      <th className="p-1 text-right">Qty</th>
-                      <th className="p-1 text-right">Actual Wt</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="border-b border-slate-200">
-                      <td className="p-1">Commercial Goods (Standard Pallets)</td>
-                      <td className="p-1 text-right font-mono">12 Pallets</td>
-                      <td className="p-1 text-right font-mono">3,800 kg</td>
-                    </tr>
-                  </tbody>
-                </table>
-
-                {/* Physical Warehouse Received Stamp Mock */}
-                <div className="border-2 border-dashed border-blue-600 bg-blue-50/40 p-2 rounded flex items-center justify-between mb-3">
-                  <div>
-                    <span className="text-[9px] font-black uppercase text-blue-900 block tracking-wider">
-                      ★ RECEIVED IN GOOD ORDER & CONDITION ★
-                    </span>
-                    <span className="text-[10px] text-blue-800 font-medium block">
-                      {activeTrip.clientName} - Gate Inward
-                    </span>
-                    <span className="text-[9px] font-mono text-blue-700">
-                      Timestamp: {activeTrip.signatory.signedAt}
-                    </span>
-                  </div>
-                  <div className="h-10 w-10 border-2 border-blue-700 rounded-full flex items-center justify-center text-blue-700 font-black text-[9px] rotate-[-12deg]">
-                    STAMP
-                  </div>
-                </div>
-
-                {/* Receiver Signature & Date */}
-                <div className="border-t border-slate-300 pt-2 flex items-center justify-between">
-                  <div>
-                    <span className="text-[9px] text-slate-600 block uppercase font-bold">
-                      Receiver Signatory
-                    </span>
-                    <span className="font-bold text-slate-900 block">
-                      {activeTrip.signatory.name}
-                    </span>
-                    <span className="text-[9px] text-slate-600 font-mono">
-                      {activeTrip.signatory.designation}
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[9px] text-slate-600 block uppercase font-bold">
-                      Driver Acknowledgement
-                    </span>
-                    <span className="font-bold text-slate-800 font-mono text-[10px]">
-                      {activeTrip.driverName}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Bottom Sub-panel: Sign-on-Glass Digital Signature Block */}
-            <div className="h-28 border-t border-slate-200 bg-white p-3 flex items-center justify-between flex-shrink-0">
-              <div className="space-y-1">
-                <span className="text-xs font-bold text-slate-900 block flex items-center gap-1.5">
-                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-                  Sign-on-Glass Digital Signature Proof
-                </span>
-                <p className="text-[11px] text-slate-600 font-mono">
-                  Signatory: {activeTrip.signatory.name} ({activeTrip.signatory.designation})
-                </p>
-                <div className="text-[10px] text-slate-600 font-mono">
-                  Captured on Driver Mobile Device • GPS verified at dock: ±4m accuracy
-                </div>
-              </div>
-
-              {/* Digital Signature Simulated Box */}
-              <div className="w-56 h-18 border-2 border-slate-300 rounded-md bg-slate-50 flex flex-col items-center justify-center p-2 relative">
-                <div className="font-serif italic font-bold text-base text-slate-800 tracking-wide rotate-[-3deg]">
-                  {activeTrip.signatory.name}
-                </div>
-                <div className="text-[9px] text-slate-600 font-mono mt-0.5">
-                  Auth Hash: #a98f-44e2-9b01
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* ========================================================================= */}
-          {/* RIGHT PANE: SYSTEM DATA & VERIFICATION - 6 Cols (50%) */}
-          {/* ========================================================================= */}
-          <section className="col-span-6 bg-white flex flex-col h-full overflow-hidden">
-            {/* Scrollable Content Body */}
-            <ScrollArea className="flex-1 p-5 space-y-5">
-              
-              {/* 1. Trip Details Card */}
-              <Card className="shadow-none border-slate-200 bg-white">
-                <CardHeader className="p-3.5 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
-                  <div className="flex items-center space-x-2">
-                    <CardTitle className="text-xs font-bold text-slate-900 uppercase tracking-wide">
-                      Trip & Dispatch Telematics
-                    </CardTitle>
-                    <Badge variant="outline" className="font-mono text-[10px] font-bold">
-                      {activeTrip.id}
-                    </Badge>
-                  </div>
-                  <Badge
+                {/* Document Controls */}
+                <div className="flex items-center space-x-1">
+                  <Button
                     variant="outline"
-                    className={`font-mono text-[10px] font-bold ${
-                      activeTrip.status === "Flagged"
-                        ? "bg-red-50 text-red-700 border-red-300"
-                        : "bg-amber-50 text-amber-700 border-amber-300"
-                    }`}
+                    size="sm"
+                    onClick={handleZoomIn}
+                    className="h-7 w-7 p-0 border-slate-200 text-slate-700 hover:bg-slate-100"
+                    title="Zoom In"
                   >
-                    {activeTrip.status} Audit
-                  </Badge>
-                </CardHeader>
+                    <ZoomIn className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleZoomOut}
+                    className="h-7 w-7 p-0 border-slate-200 text-slate-700 hover:bg-slate-100"
+                    title="Zoom Out"
+                    disabled={zoomLevel <= 0.75}
+                  >
+                    <ZoomOut className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRotate}
+                    className="h-7 w-7 p-0 border-slate-200 text-slate-700 hover:bg-slate-100"
+                    title="Rotate 90°"
+                  >
+                    <RotateCw className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleResetDoc}
+                    className="h-7 px-2 text-[10px] font-mono border-slate-200 text-slate-700 hover:bg-slate-100"
+                    title="Reset View"
+                  >
+                    Reset
+                  </Button>
+                </div>
+              </div>
 
-                <CardContent className="p-3.5 space-y-3">
-                  <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div>
-                      <span className="text-[11px] text-slate-600 block">Driver & Vehicle:</span>
-                      <span className="font-bold text-slate-900 block">{activeTrip.driverName}</span>
-                      <span className="text-[11px] font-mono text-slate-600">
-                        {activeTrip.regNo} • {activeTrip.driverPhone}
-                      </span>
+              {/* Document Canvas Area */}
+              <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-200/70">
+                {loading || tripDetailLoading ? (
+                  /* Loading State (Rule 4: skeleton in the left pane) */
+                  <div className="w-[430px] bg-white rounded-md shadow-md border border-slate-300 p-6 space-y-4 animate-pulse">
+                    <div className="h-6 bg-slate-200 rounded w-3/4 mb-3" />
+                    <div className="h-16 bg-slate-100 rounded border border-slate-200" />
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="h-12 bg-slate-100 rounded" />
+                      <div className="h-12 bg-slate-100 rounded" />
+                      <div className="h-12 bg-slate-100 rounded" />
+                    </div>
+                    <div className="h-24 bg-slate-100 rounded" />
+                    <div className="h-14 bg-slate-100 rounded border border-dashed border-slate-300" />
+                    <div className="h-8 bg-slate-200 rounded w-1/2" />
+                  </div>
+                ) : queue.length === 0 ? (
+                  /* Empty State (Rule 5: No trips pending audit) */
+                  <div className="text-center p-8 bg-white rounded-lg border border-slate-300 shadow-sm max-w-sm">
+                    <FileCheck2 className="h-10 w-10 text-slate-400 mx-auto mb-2" />
+                    <p className="text-sm font-bold text-slate-800">No trips pending audit.</p>
+                    <p className="text-xs text-slate-500 mt-1">There are no operational deliveries awaiting verification.</p>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      transform: `scale(${zoomLevel}) rotate(${rotation}deg)`,
+                      transition: "transform 0.15s ease-out",
+                      transformOrigin: "center center",
+                    }}
+                    className="w-[430px] bg-white rounded-md shadow-md border border-slate-300 p-6 text-slate-800 text-[11px] select-none"
+                  >
+                    {/* Consignment Note / Lorry Receipt Header */}
+                    <div className="border-b-2 border-slate-900 pb-3 mb-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-black text-sm text-slate-900 tracking-wider">
+                            VECTO 3PL CARRIERS LTD.
+                          </h4>
+                          <p className="text-[9px] text-slate-500 uppercase font-mono">
+                            Consignment Note / Lorry Receipt (Consignee Copy)
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-mono font-bold text-xs block text-slate-900">
+                            {tripNumberDisplay}
+                          </span>
+                          <span className="text-[9px] text-slate-500 font-mono">
+                            Date: {departureDisplay !== "—" ? departureDisplay : "Active"}
+                          </span>
+                        </div>
+                      </div>
                     </div>
 
-                    <div>
-                      <span className="text-[11px] text-slate-600 block">Consignee Client:</span>
-                      <span className="font-bold text-slate-900 block truncate">
-                        {activeTrip.clientName}
-                      </span>
-                      <span className="text-[11px] font-mono text-slate-600">
-                        {activeTrip.invoiceNo}
-                      </span>
+                    {/* LR Grid Data */}
+                    <div className="grid grid-cols-2 gap-2 border border-slate-300 p-2.5 rounded bg-slate-50/50 mb-3">
+                      <div>
+                        <span className="text-[9px] text-slate-600 block uppercase font-bold">
+                          Consignor (Sender)
+                        </span>
+                        <span className="font-bold text-slate-800 block truncate">
+                          {originDisplay}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-600 block uppercase font-bold">
+                          Consignee (Receiver)
+                        </span>
+                        <span className="font-bold text-slate-800 block truncate">
+                          {clientNameDisplay}
+                        </span>
+                        <span className="text-[10px] text-slate-600 block truncate">
+                          {destinationDisplay}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 border border-slate-300 p-2 rounded bg-slate-50/50 text-[10px] font-mono mb-3">
+                      <div>
+                        <span className="text-[9px] text-slate-600 block uppercase font-bold">
+                          Truck No
+                        </span>
+                        <span className="font-bold text-slate-900">{vehicleRegDisplay}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-600 block uppercase font-bold">
+                          Invoice No
+                        </span>
+                        <span className="font-bold text-slate-900">{invoiceNoDisplay}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-600 block uppercase font-bold">
+                          COD Value
+                        </span>
+                        <span className="font-bold text-slate-900">
+                          {expectedCod != null ? formatRupees(expectedCod) : "—"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Material Table Preview */}
+                    <table className="w-full text-[10px] border border-slate-300 mb-3 text-left">
+                      <thead className="bg-slate-100 border-b border-slate-300 font-semibold">
+                        <tr>
+                          <th className="p-1">Item / Pkg</th>
+                          <th className="p-1 text-right">Destination</th>
+                          <th className="p-1 text-right">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-1">Commercial Consignment</td>
+                          <td className="p-1 text-right font-mono truncate max-w-[120px]">
+                            {destinationDisplay}
+                          </td>
+                          <td className="p-1 text-right font-mono">
+                            {tripDetail?.status ? String(tripDetail.status) : "DELIVERED"}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    {/* Warehouse Received Stamp Proof */}
+                    <div className="border-2 border-dashed border-blue-600 bg-blue-50/40 p-2 rounded flex items-center justify-between mb-3">
+                      <div>
+                        <span className="text-[9px] font-black uppercase text-blue-900 block tracking-wider">
+                          ★ RECEIVED IN GOOD ORDER &amp; CONDITION ★
+                        </span>
+                        <span className="text-[10px] text-blue-800 font-medium block">
+                          {clientNameDisplay} - Gate Inward
+                        </span>
+                        <span className="text-[9px] font-mono text-blue-700">
+                          Verified at dock arrival
+                        </span>
+                      </div>
+                      <div className="h-10 w-10 border-2 border-blue-700 rounded-full flex items-center justify-center text-blue-700 font-black text-[9px] rotate-[-12deg]">
+                        STAMP
+                      </div>
+                    </div>
+
+                    {/* Receiver Signature & Date */}
+                    <div className="border-t border-slate-300 pt-2 flex items-center justify-between">
+                      <div>
+                        <span className="text-[9px] text-slate-600 block uppercase font-bold">
+                          Receiver Signatory
+                        </span>
+                        <span className="font-bold text-slate-900 block">
+                          {signatoryNameDisplay}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[9px] text-slate-600 block uppercase font-bold">
+                          Driver Acknowledgement
+                        </span>
+                        <span className="font-bold text-slate-800 font-mono text-[10px]">
+                          {driverNameDisplay}
+                        </span>
+                      </div>
                     </div>
                   </div>
+                )}
+              </div>
 
-                  <div className="grid grid-cols-2 gap-3 text-xs pt-2 border-t border-slate-100">
-                    <div>
-                      <span className="text-[11px] text-slate-600 block">Departure:</span>
-                      <span className="font-mono text-slate-800 text-[11px] font-medium">
-                        {activeTrip.departureTime}
-                      </span>
-                      <span className="text-[10px] text-slate-600 block truncate">
-                        {activeTrip.origin}
-                      </span>
-                    </div>
-
-                    <div>
-                      <span className="text-[11px] text-slate-600 block">Arrival / Unloaded:</span>
-                      <span className="font-mono text-slate-800 text-[11px] font-medium">
-                        {activeTrip.arrivalTime}
-                      </span>
-                      <span className="text-[10px] text-slate-600 block truncate">
-                        {activeTrip.destination}
-                      </span>
-                    </div>
+              {/* Bottom Sub-panel: Sign-on-Glass Digital Signature Block */}
+              <div className="h-28 border-t border-slate-200 bg-white p-3 flex items-center justify-between flex-shrink-0">
+                <div className="space-y-1">
+                  <span className="text-xs font-bold text-slate-900 block flex items-center gap-1.5">
+                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                    Sign-on-Glass Digital Signature Proof
+                  </span>
+                  <p className="text-[11px] text-slate-600 font-mono">
+                    Signatory: {signatoryNameDisplay}
+                  </p>
+                  <div className="text-[10px] text-slate-600 font-mono">
+                    Captured on Driver Mobile Device • Verified at dock
                   </div>
+                </div>
 
-                  <div className="grid grid-cols-2 gap-3 text-xs pt-2 border-t border-slate-100">
-                    <div className="p-2 bg-slate-50 rounded border border-slate-200">
-                      <span className="text-[10px] text-slate-600 uppercase font-bold block">
-                        System GPS Distance
-                      </span>
-                      <span className="text-sm font-black font-mono text-slate-900">
-                        {activeTrip.systemGpsDistance} km
-                      </span>
-                    </div>
-
-                    <div className="p-2 bg-slate-50 rounded border border-slate-200">
-                      <span className="text-[10px] text-slate-600 uppercase font-bold block">
-                        Odometer Logged
-                      </span>
-                      <span className="text-sm font-black font-mono text-slate-900">
-                        {activeTrip.odometerDistance} km
-                      </span>
-                      <span className="text-[10px] text-emerald-600 font-mono font-medium ml-1">
-                        (Diff: {Math.abs(activeTrip.systemGpsDistance - activeTrip.odometerDistance)} km)
-                      </span>
-                    </div>
+                {/* Digital Signature Verification Box */}
+                <div className="w-56 h-18 border-2 border-slate-300 rounded-md bg-slate-50 flex flex-col items-center justify-center p-2 relative">
+                  <div className="font-serif italic font-bold text-base text-slate-800 tracking-wide rotate-[-3deg]">
+                    {signatoryNameDisplay !== "—" ? signatoryNameDisplay : "Verified Sign"}
                   </div>
-                </CardContent>
-              </Card>
+                  <div className="text-[9px] text-slate-600 font-mono mt-0.5">
+                    Dock Verified
+                  </div>
+                </div>
+              </div>
+            </section>
 
-              {/* 2. Financial / Expense Tally Section */}
-              <Card className="shadow-none border-slate-200 bg-white">
-                <CardHeader className="p-3.5 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
-                  <CardTitle className="text-xs font-bold text-slate-900 uppercase tracking-wide">
-                    Financial Tally: Reported vs System Expected
-                  </CardTitle>
-                  <span className="text-[11px] font-mono text-slate-600">Currency: INR (₹)</span>
-                </CardHeader>
+            {/* ========================================================================= */}
+            {/* RIGHT PANE: SYSTEM DATA & VERIFICATION - 6 Cols (50%) */}
+            {/* ========================================================================= */}
+            <section className="col-span-6 bg-white flex flex-col h-full overflow-hidden">
+              {/* Scrollable Content Body */}
+              <ScrollArea className="flex-1 p-5 space-y-5">
+                {/* 1. Trip Details Card */}
+                <Card className="shadow-none border-slate-200 bg-white mb-5">
+                  <CardHeader className="p-3.5 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
+                    <div className="flex items-center space-x-2">
+                      <CardTitle className="text-xs font-bold text-slate-900 uppercase tracking-wide">
+                        Trip &amp; Dispatch Telematics
+                      </CardTitle>
+                      <Badge variant="outline" className="font-mono text-[10px] font-bold">
+                        {tripNumberDisplay}
+                      </Badge>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className="font-mono text-[10px] font-bold uppercase bg-amber-50 text-amber-700 border-amber-300"
+                    >
+                      {tripDetail?.status ? String(tripDetail.status) : "PENDING AUDIT"}
+                    </Badge>
+                  </CardHeader>
 
-                <CardContent className="p-0">
-                  <Table>
-                    <TableHeader className="bg-slate-50/75 text-[11px]">
-                      <TableRow className="border-b border-slate-200">
-                        <TableHead className="py-2 text-slate-600 font-semibold">Line Item</TableHead>
-                        <TableHead className="py-2 text-right text-slate-600 font-semibold">
-                          Driver Reported
-                        </TableHead>
-                        <TableHead className="py-2 text-right text-slate-600 font-semibold">
-                          System Policy
-                        </TableHead>
-                        <TableHead className="py-2 text-right text-slate-600 font-semibold">
-                          Variance
-                        </TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody className="text-xs font-mono">
-                      <TableRow className="border-b border-slate-100">
-                        <TableCell className="py-2 font-sans text-slate-800">Toll Payments</TableCell>
-                        <TableCell className="py-2 text-right">
-                          ₹{activeTrip.reportedExpenses.toll.toLocaleString("en-IN")}
-                        </TableCell>
-                        <TableCell className="py-2 text-right text-slate-600">
-                          ₹{activeTrip.systemAllowedExpenses.toll.toLocaleString("en-IN")}
-                        </TableCell>
-                        <TableCell className="py-2 text-right text-emerald-600 font-medium">
-                          ₹{(activeTrip.reportedExpenses.toll - activeTrip.systemAllowedExpenses.toll).toLocaleString("en-IN")}
-                        </TableCell>
-                      </TableRow>
+                  <CardContent className="p-3.5 space-y-3">
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <span className="text-[11px] text-slate-600 block">Driver &amp; Vehicle:</span>
+                        <span className="font-bold text-slate-900 block">{driverNameDisplay}</span>
+                        <span className="text-[11px] font-mono text-slate-600">
+                          {vehicleRegDisplay} • {driverPhoneDisplay}
+                        </span>
+                      </div>
 
-                      <TableRow className="border-b border-slate-100">
-                        <TableCell className="py-2 font-sans text-slate-800">Fuel & AdBlue</TableCell>
-                        <TableCell className="py-2 text-right">
-                          ₹{activeTrip.reportedExpenses.fuel.toLocaleString("en-IN")}
-                        </TableCell>
-                        <TableCell className="py-2 text-right text-slate-600">
-                          ₹{activeTrip.systemAllowedExpenses.fuel.toLocaleString("en-IN")}
-                        </TableCell>
-                        <TableCell className={`py-2 text-right font-medium ${
-                          activeTrip.reportedExpenses.fuel > activeTrip.systemAllowedExpenses.fuel
-                            ? "text-red-600"
-                            : "text-emerald-600"
-                        }`}>
-                          {activeTrip.reportedExpenses.fuel > activeTrip.systemAllowedExpenses.fuel ? "+" : ""}
-                          ₹{(activeTrip.reportedExpenses.fuel - activeTrip.systemAllowedExpenses.fuel).toLocaleString("en-IN")}
-                        </TableCell>
-                      </TableRow>
+                      <div>
+                        <span className="text-[11px] text-slate-600 block">Consignee Client:</span>
+                        <span className="font-bold text-slate-900 block truncate">
+                          {clientNameDisplay}
+                        </span>
+                        <span className="text-[11px] font-mono text-slate-600">
+                          {invoiceNoDisplay}
+                        </span>
+                      </div>
+                    </div>
 
-                      <TableRow className="border-b border-slate-100">
-                        <TableCell className="py-2 font-sans text-slate-800">Driver Allowance</TableCell>
-                        <TableCell className="py-2 text-right">
-                          ₹{activeTrip.reportedExpenses.allowance.toLocaleString("en-IN")}
-                        </TableCell>
-                        <TableCell className="py-2 text-right text-slate-600">
-                          ₹{activeTrip.systemAllowedExpenses.allowance.toLocaleString("en-IN")}
-                        </TableCell>
-                        <TableCell className="py-2 text-right text-slate-600">
-                          ₹{(activeTrip.reportedExpenses.allowance - activeTrip.systemAllowedExpenses.allowance).toLocaleString("en-IN")}
-                        </TableCell>
-                      </TableRow>
+                    <div className="grid grid-cols-2 gap-3 text-xs pt-2 border-t border-slate-100">
+                      <div>
+                        <span className="text-[11px] text-slate-600 block">Departure:</span>
+                        <span className="font-mono text-slate-800 text-[11px] font-medium">
+                          {departureDisplay}
+                        </span>
+                        <span className="text-[10px] text-slate-600 block truncate">
+                          {originDisplay}
+                        </span>
+                      </div>
 
-                      {/* COD / Cash Received Line */}
-                      <TableRow className="border-b border-slate-200 bg-slate-50/50 font-bold">
-                        <TableCell className="py-2.5 font-sans text-slate-900">
-                          Total COD Cash Remitted
-                        </TableCell>
-                        <TableCell className="py-2.5 text-right text-slate-900">
-                          ₹{activeTrip.reportedCod.toLocaleString("en-IN")}
-                        </TableCell>
-                        <TableCell className="py-2.5 text-right text-slate-700">
-                          ₹{activeTrip.expectedCod.toLocaleString("en-IN")}
-                        </TableCell>
-                        <TableCell className={`py-2.5 text-right font-black ${
-                          cashDeficit === 0 ? "text-emerald-600" : "text-red-600"
-                        }`}>
-                          {cashDeficit === 0
-                            ? "Balanced"
-                            : `Deficit: -₹${Math.abs(cashDeficit).toLocaleString("en-IN")}`}
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
+                      <div>
+                        <span className="text-[11px] text-slate-600 block">Arrival / Unloaded:</span>
+                        <span className="font-mono text-slate-800 text-[11px] font-medium">
+                          {arrivalDisplay}
+                        </span>
+                        <span className="text-[10px] text-slate-600 block truncate">
+                          {destinationDisplay}
+                        </span>
+                      </div>
+                    </div>
 
-              {/* 3. Validation Checklist (Interactive audit checks) */}
-              <Card className="shadow-none border-slate-200 bg-white">
-                <CardHeader className="p-3.5 border-b border-slate-200">
-                  <CardTitle className="text-xs font-bold text-slate-900 uppercase tracking-wide">
-                    Audit Verification Checklist
-                  </CardTitle>
-                  <CardDescription className="text-[11px] text-slate-500">
-                    All mandatory checks must be acknowledged prior to sending invoice to billing.
-                  </CardDescription>
-                </CardHeader>
+                    <div className="grid grid-cols-2 gap-3 text-xs pt-2 border-t border-slate-100">
+                      <div className="p-2 bg-slate-50 rounded border border-slate-200">
+                        <span className="text-[10px] text-slate-600 uppercase font-bold block">
+                          Start Odometer
+                        </span>
+                        <span className="text-sm font-black font-mono text-slate-900">
+                          {startOdometer != null ? `${startOdometer} km` : "—"}
+                        </span>
+                      </div>
 
-                <CardContent className="p-3.5 space-y-2">
-                  {[
-                    {
-                      key: "distanceMatch",
-                      label: "Distance Match: GPS Corridor aligns within ±3% of Odometer",
-                    },
-                    {
-                      key: "cashMatch",
-                      label: "Cash Match: Remitted Cash conforms to invoice COD line value",
-                    },
-                    {
-                      key: "signaturePresent",
-                      label: "Signature Present: Valid receiver digital / glass sign captured",
-                    },
-                    {
-                      key: "consigneeStamp",
-                      label: "Consignee Stamp Verified: Official dock stamp visible on physical LR",
-                    },
-                    {
-                      key: "podQualityReadable",
-                      label: "Document Legibility: All product quantities and seal serials readable",
-                    },
-                  ].map((item) => {
-                    const isChecked = checklist[item.key as keyof typeof checklist];
-                    return (
-                      <button
-                        key={item.key}
-                        type="button"
-                        onClick={() => toggleCheck(item.key as keyof typeof checklist)}
-                        className={`w-full flex items-center justify-between p-2 rounded-md border text-xs text-left transition-all ${
-                          isChecked
-                            ? "bg-slate-50/80 border-slate-300 text-slate-900"
-                            : "bg-red-50/50 border-red-200 text-red-900"
-                        }`}
-                      >
-                        <span className="font-medium pr-2">{item.label}</span>
-                        {isChecked ? (
-                          <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                      <div className="p-2 bg-slate-50 rounded border border-slate-200">
+                        <span className="text-[10px] text-slate-600 uppercase font-bold block">
+                          End / Current Odometer
+                        </span>
+                        <span className="text-sm font-black font-mono text-slate-900">
+                          {currentOdometer != null ? `${currentOdometer} km` : "—"}
+                        </span>
+                        {odometerDistance != null && (
+                          <span className="text-[10px] text-emerald-600 font-mono font-medium ml-1">
+                            (Distance: {odometerDistance} km)
+                          </span>
                         )}
-                      </button>
-                    );
-                  })}
-                </CardContent>
-              </Card>
-            </ScrollArea>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
 
-            {/* STICKY ACTION FOOTER (Bottom of Right Pane) */}
-            <div className="p-4 border-t border-slate-200 bg-slate-50/80 flex items-center space-x-3 flex-shrink-0">
-              {/* Massive Red Outline Button: Raise Discrepancy */}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setIsDisputeModalOpen(true)}
-                className="flex-1 py-6 text-sm font-bold text-red-600 border-2 border-red-300 hover:bg-red-50 hover:text-red-700 hover:border-red-400 active:scale-[0.99] transition-all"
-              >
-                <AlertOctagon className="h-4 w-4 mr-1.5" />
-                Raise Discrepancy
-              </Button>
+                {/* 2. Financial / Expense Tally Section */}
+                <Card className="shadow-none border-slate-200 bg-white mb-5">
+                  <CardHeader className="p-3.5 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
+                    <CardTitle className="text-xs font-bold text-slate-900 uppercase tracking-wide">
+                      Financial Tally: Reported vs System Expected
+                    </CardTitle>
+                    <span className="text-[11px] font-mono text-slate-600">Currency: INR (₹)</span>
+                  </CardHeader>
 
-              {/* Massive Solid Green/Blue Button: Verify & Send to Billing */}
-              <Button
-                type="button"
-                onClick={handleVerifyAndApprove}
-                className="flex-1 py-6 text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white shadow-md active:scale-[0.99] transition-all flex items-center justify-center gap-1.5"
-              >
-                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                Verify & Send to Billing
-              </Button>
-            </div>
-          </section>
-        </div>
+                  <CardContent className="p-0">
+                    <Table>
+                      <TableHeader className="bg-slate-50/75 text-[11px]">
+                        <TableRow className="border-b border-slate-200">
+                          <TableHead className="py-2 text-slate-600 font-semibold">Line Item</TableHead>
+                          <TableHead className="py-2 text-right text-slate-600 font-semibold">
+                            Driver Reported
+                          </TableHead>
+                          <TableHead className="py-2 text-right text-slate-600 font-semibold">
+                            System Policy / Expected
+                          </TableHead>
+                          <TableHead className="py-2 text-right text-slate-600 font-semibold">
+                            Variance
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody className="text-xs font-mono">
+                        <TableRow className="border-b border-slate-100">
+                          <TableCell className="py-2 font-sans text-slate-800">Toll Expenses</TableCell>
+                          <TableCell className="py-2 text-right">
+                            {tollReported != null ? formatRupees(tollReported) : "—"}
+                          </TableCell>
+                          <TableCell className="py-2 text-right text-slate-600">
+                            {tollReported != null ? formatRupees(tollReported) : "—"}
+                          </TableCell>
+                          <TableCell className="py-2 text-right text-emerald-600 font-medium">
+                            ₹0
+                          </TableCell>
+                        </TableRow>
+
+                        <TableRow className="border-b border-slate-100">
+                          <TableCell className="py-2 font-sans text-slate-800">Fuel &amp; AdBlue</TableCell>
+                          <TableCell className="py-2 text-right">
+                            {fuelReported != null ? formatRupees(fuelReported) : "—"}
+                          </TableCell>
+                          <TableCell className="py-2 text-right text-slate-600">
+                            {fuelReported != null ? formatRupees(fuelReported) : "—"}
+                          </TableCell>
+                          <TableCell className="py-2 text-right text-emerald-600 font-medium">
+                            ₹0
+                          </TableCell>
+                        </TableRow>
+
+                        <TableRow className="border-b border-slate-100">
+                          <TableCell className="py-2 font-sans text-slate-800">Driver Allowance</TableCell>
+                          <TableCell className="py-2 text-right">
+                            {allowanceReported != null ? formatRupees(allowanceReported) : "—"}
+                          </TableCell>
+                          <TableCell className="py-2 text-right text-slate-600">
+                            {allowanceReported != null ? formatRupees(allowanceReported) : "—"}
+                          </TableCell>
+                          <TableCell className="py-2 text-right text-slate-600">
+                            ₹0
+                          </TableCell>
+                        </TableRow>
+
+                        {/* COD / Cash Received Line */}
+                        <TableRow className="border-b border-slate-200 bg-slate-50/50 font-bold">
+                          <TableCell className="py-2.5 font-sans text-slate-900">
+                            Total COD Cash Remitted
+                          </TableCell>
+                          <TableCell className="py-2.5 text-right text-slate-900">
+                            {collectedCod != null ? formatRupees(collectedCod) : "—"}
+                          </TableCell>
+                          <TableCell className="py-2.5 text-right text-slate-700">
+                            {expectedCod != null ? formatRupees(expectedCod) : "—"}
+                          </TableCell>
+                          <TableCell
+                            className={`py-2.5 text-right font-black ${
+                              cashDeficit === null
+                                ? "text-slate-600"
+                                : cashDeficit === 0
+                                ? "text-emerald-600"
+                                : "text-red-600"
+                            }`}
+                          >
+                            {cashDeficit === null
+                              ? "—"
+                              : cashDeficit === 0
+                              ? "Balanced"
+                              : `Deficit: -${formatRupees(Math.abs(cashDeficit))}`}
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+
+                {/* 3. Validation Checklist */}
+                <Card className="shadow-none border-slate-200 bg-white mb-5">
+                  <CardHeader className="p-3.5 border-b border-slate-200">
+                    <CardTitle className="text-xs font-bold text-slate-900 uppercase tracking-wide">
+                      Audit Verification Checklist
+                    </CardTitle>
+                    <CardDescription className="text-[11px] text-slate-500">
+                      All mandatory checks must be acknowledged prior to sending invoice to billing.
+                    </CardDescription>
+                  </CardHeader>
+
+                  <CardContent className="p-3.5 space-y-2">
+                    {[
+                      {
+                        key: "distanceMatch",
+                        label: "Distance Match: GPS Corridor aligns within ±3% of Odometer",
+                      },
+                      {
+                        key: "cashMatch",
+                        label: "Cash Match: Remitted Cash conforms to invoice COD line value",
+                      },
+                      {
+                        key: "signaturePresent",
+                        label: "Signature Present: Valid receiver digital / glass sign captured",
+                      },
+                      {
+                        key: "consigneeStamp",
+                        label: "Consignee Stamp Verified: Official dock stamp visible on physical LR",
+                      },
+                      {
+                        key: "podQualityReadable",
+                        label: "Document Legibility: All product quantities and seal serials readable",
+                      },
+                    ].map((item) => {
+                      const isChecked = checklist[item.key as keyof typeof checklist];
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => toggleCheck(item.key as keyof typeof checklist)}
+                          className={`w-full flex items-center justify-between p-2 rounded-md border text-xs text-left transition-all ${
+                            isChecked
+                              ? "bg-slate-50/80 border-slate-300 text-slate-900"
+                              : "bg-red-50/50 border-red-200 text-red-900"
+                          }`}
+                        >
+                          <span className="font-medium pr-2">{item.label}</span>
+                          {isChecked ? (
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </CardContent>
+                </Card>
+
+                {/* Audit Clearance Notes Input */}
+                <div className="space-y-1 mb-2">
+                  <Label htmlFor="audit-notes" className="text-xs font-bold text-slate-700">
+                    Audit Clearance Notes
+                  </Label>
+                  <Input
+                    id="audit-notes"
+                    type="text"
+                    placeholder="Enter approval notes (e.g. Verified against physical dock manifest)"
+                    value={auditNotes}
+                    onChange={(e) => setAuditNotes(e.target.value)}
+                    className="h-9 text-xs border-slate-300 bg-slate-50"
+                  />
+                </div>
+              </ScrollArea>
+
+              {/* STICKY ACTION FOOTER (Bottom of Right Pane) */}
+              <div className="p-4 border-t border-slate-200 bg-slate-50/80 flex items-center space-x-3 flex-shrink-0">
+                {/* Red Outline Button: Raise Discrepancy */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!selectedTripId || actionLoading}
+                  onClick={() => setIsDisputeModalOpen(true)}
+                  className="flex-1 py-6 text-sm font-bold text-red-600 border-2 border-red-300 hover:bg-red-50 hover:text-red-700 hover:border-red-400 active:scale-[0.99] transition-all disabled:opacity-50"
+                >
+                  <AlertOctagon className="h-4 w-4 mr-1.5" />
+                  Raise Discrepancy
+                </Button>
+
+                {/* Solid Button: Verify & Send to Billing */}
+                <Button
+                  type="button"
+                  disabled={!selectedTripId || actionLoading}
+                  onClick={handleVerifyAndApprove}
+                  className="flex-1 py-6 text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white shadow-md active:scale-[0.99] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                  {actionLoading ? "Processing..." : "Verify & Send to Billing"}
+                </Button>
+              </div>
+            </section>
+          </div>
         )}
       </div>
 
@@ -1354,7 +1433,7 @@ export default function InternalAuditWorkspace() {
               </DialogTitle>
             </div>
             <DialogDescription className="text-xs text-red-800 mt-1">
-              Mark trip {activeTrip.id} ({activeTrip.invoiceNo}) as disputed and send notice to Dispatch and Accounts.
+              Mark trip {tripNumberDisplay} as disputed and request correction.
             </DialogDescription>
           </DialogHeader>
 
@@ -1367,8 +1446,8 @@ export default function InternalAuditWorkspace() {
                 <Textarea
                   id="reason"
                   rows={4}
-                  value={discrepancyReason}
-                  onChange={(e) => setDiscrepancyReason(e.target.value)}
+                  value={discrepancyNotes}
+                  onChange={(e) => setDiscrepancyNotes(e.target.value)}
                   className="mt-1 text-xs border-slate-300"
                   required
                 />
@@ -1392,9 +1471,10 @@ export default function InternalAuditWorkspace() {
               <Button
                 type="submit"
                 size="sm"
-                className="h-8 text-xs bg-red-600 hover:bg-red-700 text-white font-semibold"
+                disabled={actionLoading}
+                className="h-8 text-xs bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-50"
               >
-                Confirm Rejection & Flag
+                {actionLoading ? "Submitting..." : "Confirm Rejection & Flag"}
               </Button>
             </DialogFooter>
           </form>
