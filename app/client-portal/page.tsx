@@ -211,6 +211,13 @@ export default function ClientAccountsPayablePortal() {
   const [activeMenu, setActiveMenu] = useState("Invoice Inbox");
   const [searchQuery, setSearchQuery] = useState("");
   const [invoices, setInvoices] = useState<ClientInvoice[]>(INITIAL_INVOICES);
+  const [apContactEmail, setApContactEmail] = useState("ap.payments@metro-wholesale.in");
+  const [notificationPreferences, setNotificationPreferences] = useState({
+    invoices: true,
+    disputes: true,
+    payments: true,
+  });
+  const [settingsSaved, setSettingsSaved] = useState(false);
 
   // Deep-Dive Modal State
   const [selectedInvoice, setSelectedInvoice] = useState<ClientInvoice | null>(null);
@@ -237,11 +244,46 @@ export default function ClientAccountsPayablePortal() {
     });
   }, [invoices, searchQuery]);
 
+  const matchesSearch = (values: string[]) => {
+    const query = searchQuery.trim().toLowerCase();
+    return !query || values.some((value) => value.toLowerCase().includes(query));
+  };
+  const paidInvoices = invoices.filter(
+    (invoice) => invoice.status === "Paid" && matchesSearch([invoice.invoiceNo, invoice.vendorName]),
+  );
+  const disputedLines = invoices.flatMap((invoice) =>
+    invoice.lineItems
+      .filter((item) => item.isDisputed)
+      .map((item) => ({ invoice, item })),
+  );
+  const filteredDisputedLines = disputedLines.filter(({ invoice, item }) =>
+    matchesSearch([
+      invoice.invoiceNo,
+      item.id,
+      item.lrNumber,
+      item.disputeReason || "",
+      item.disputeComments || "",
+    ]),
+  );
+  const activeDisputeCount = disputedLines.length;
+  const pendingInvoiceCount = invoices.filter(
+    (invoice) => invoice.status === "Pending Approval" || invoice.status === "Partially Disputed",
+  ).length;
+
   // Open Deep-Dive Modal
-  const handleOpenInvoiceModal = (inv: ClientInvoice) => {
-    setSelectedInvoice(JSON.parse(JSON.stringify(inv)));
-    setActiveDisputeTripId(null);
+  const handleOpenInvoiceModal = (inv: ClientInvoice, disputeTripId?: string) => {
+    const invoiceCopy = JSON.parse(JSON.stringify(inv)) as ClientInvoice;
+    setSelectedInvoice(invoiceCopy);
+    setActiveDisputeTripId(disputeTripId ?? null);
     setViewingPodTrip(null);
+    if (disputeTripId) {
+      const disputedTrip = invoiceCopy.lineItems.find((item) => item.id === disputeTripId);
+      if (disputedTrip) {
+        setDisputeReason(disputedTrip.disputeReason || "Damaged Goods");
+        setDisputeAmountInput(disputedTrip.disputeAmount?.toString() || "3500");
+        setDisputeComments(disputedTrip.disputeComments || "");
+      }
+    }
     setIsModalOpen(true);
   };
 
@@ -358,6 +400,11 @@ export default function ClientAccountsPayablePortal() {
     );
   };
 
+  const handleSaveVendorSettings = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSettingsSaved(true);
+  };
+
   return (
     <div className="flex h-screen w-full bg-slate-100 text-slate-800 font-sans antialiased overflow-hidden">
       {/* 1. LEFT SIDEBAR (Client Portal Themed - Clean Crisp Light Slate/White) */}
@@ -400,9 +447,13 @@ export default function ClientAccountsPayablePortal() {
         {/* Navigation Menu */}
         <nav className="flex-1 px-3 py-4 space-y-1">
           {[
-            { name: "Invoice Inbox", icon: Inbox, count: "2 Pending" },
+            { name: "Invoice Inbox", icon: Inbox, count: `${pendingInvoiceCount} Pending` },
             { name: "Payment History", icon: CreditCard, count: null },
-            { name: "Active Disputes", icon: AlertTriangle, count: "1 Flagged" },
+            {
+              name: "Active Disputes",
+              icon: AlertTriangle,
+              count: activeDisputeCount ? `${activeDisputeCount} Flagged` : null,
+            },
             { name: "Vendor Settings", icon: Settings, count: null },
           ].map((item) => {
             const Icon = item.icon;
@@ -410,7 +461,12 @@ export default function ClientAccountsPayablePortal() {
             return (
               <button
                 key={item.name}
-                onClick={() => setActiveMenu(item.name)}
+                type="button"
+                onClick={() => {
+                  setActiveMenu(item.name);
+                  setSearchQuery("");
+                }}
+                aria-current={isActive ? "page" : undefined}
                 className={`w-full flex items-center space-x-3 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
                   isActive
                     ? "bg-slate-900 text-white shadow-xs"
@@ -442,7 +498,7 @@ export default function ClientAccountsPayablePortal() {
           </span>
           <div className="space-y-1">
             <Link
-              href="/"
+              href="/dispatch"
               className="flex items-center justify-between text-xs text-slate-600 hover:text-slate-900 p-1.5 rounded hover:bg-white transition-colors"
             >
               <span className="flex items-center gap-1.5 font-medium">
@@ -496,7 +552,14 @@ export default function ClientAccountsPayablePortal() {
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
               <Input
                 type="text"
-                placeholder="Search Invoices, Status..."
+                placeholder={
+                  activeMenu === "Payment History"
+                    ? "Search paid invoices..."
+                    : activeMenu === "Active Disputes"
+                    ? "Search disputes, trips..."
+                    : "Search Invoices, Status..."
+                }
+                disabled={activeMenu === "Vendor Settings"}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="h-8 pl-8 text-xs bg-slate-50 border-slate-200"
@@ -519,6 +582,7 @@ export default function ClientAccountsPayablePortal() {
 
         {/* 3. MAIN CONTENT: INVOICE INBOX VIEW */}
         <main className="flex-1 overflow-y-auto p-6 space-y-4">
+          {activeMenu === "Invoice Inbox" && (
           <Card className="shadow-none border-slate-200 bg-white">
             <CardHeader className="p-4 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
               <div>
@@ -619,6 +683,198 @@ export default function ClientAccountsPayablePortal() {
               </Table>
             </CardContent>
           </Card>
+          )}
+
+          {activeMenu === "Payment History" && (
+            <Card className="shadow-none border-slate-200 bg-white">
+              <CardHeader className="p-4 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
+                <div>
+                  <CardTitle className="text-sm font-bold text-slate-900">Payment History</CardTitle>
+                  <CardDescription className="text-xs text-slate-500 mt-0.5">
+                    Invoices marked as paid for Metro Wholesale India.
+                  </CardDescription>
+                </div>
+                <Badge variant="outline" className="font-mono text-xs">
+                  {paidInvoices.length} Settled
+                </Badge>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader className="bg-slate-50/75">
+                    <TableRow className="border-b border-slate-200">
+                      <TableHead className="py-3 text-xs font-semibold text-slate-600">Invoice</TableHead>
+                      <TableHead className="py-3 text-xs font-semibold text-slate-600">Vendor</TableHead>
+                      <TableHead className="py-3 text-xs font-semibold text-slate-600">Invoice Date</TableHead>
+                      <TableHead className="py-3 text-right text-xs font-semibold text-slate-600">Amount (₹)</TableHead>
+                      <TableHead className="py-3 text-center text-xs font-semibold text-slate-600">Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {paidInvoices.length ? (
+                      paidInvoices.map((invoice) => (
+                        <TableRow key={invoice.invoiceNo} className="border-b border-slate-200 text-xs">
+                          <TableCell className="py-3 font-mono font-bold text-slate-900">{invoice.invoiceNo}</TableCell>
+                          <TableCell className="py-3 text-slate-700">{invoice.vendorName}</TableCell>
+                          <TableCell className="py-3 font-mono text-slate-700">{invoice.issueDate}</TableCell>
+                          <TableCell className="py-3 text-right font-mono font-bold text-slate-900">
+                            ₹{invoice.grossAmount.toLocaleString("en-IN")}
+                          </TableCell>
+                          <TableCell className="py-3 text-center">
+                            <Badge className="border border-emerald-300 bg-emerald-50 text-emerald-700">Paid</Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={5} className="py-10 text-center text-sm text-slate-500">
+                          No paid invoices match your search.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          {activeMenu === "Active Disputes" && (
+            <Card className="shadow-none border-slate-200 bg-white">
+              <CardHeader className="p-4 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
+                <div>
+                  <CardTitle className="text-sm font-bold text-slate-900">Active Disputes</CardTitle>
+                  <CardDescription className="text-xs text-slate-500 mt-0.5">
+                    Review disputed trip lines and their requested deductions.
+                  </CardDescription>
+                </div>
+                <Badge variant="outline" className="font-mono text-xs">
+                  {activeDisputeCount} Flagged
+                </Badge>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader className="bg-slate-50/75">
+                    <TableRow className="border-b border-slate-200">
+                      <TableHead className="py-3 text-xs font-semibold text-slate-600">Trip / LR</TableHead>
+                      <TableHead className="py-3 text-xs font-semibold text-slate-600">Invoice</TableHead>
+                      <TableHead className="py-3 text-xs font-semibold text-slate-600">Reason</TableHead>
+                      <TableHead className="py-3 text-right text-xs font-semibold text-slate-600">Deduction (₹)</TableHead>
+                      <TableHead className="py-3 text-right text-xs font-semibold text-slate-600">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredDisputedLines.length ? (
+                      filteredDisputedLines.map(({ invoice, item }) => (
+                        <TableRow key={`${invoice.invoiceNo}-${item.id}`} className="border-b border-slate-200 text-xs">
+                          <TableCell className="py-3 font-mono font-bold text-slate-900">
+                            {item.id}<span className="block text-[10px] font-normal text-slate-500">{item.lrNumber}</span>
+                          </TableCell>
+                          <TableCell className="py-3 font-mono text-slate-700">{invoice.invoiceNo}</TableCell>
+                          <TableCell className="py-3 text-slate-700">
+                            <span className="font-semibold">{item.disputeReason || "Unspecified"}</span>
+                            {item.disputeComments && <span className="mt-1 block text-[11px] text-slate-500">{item.disputeComments}</span>}
+                          </TableCell>
+                          <TableCell className="py-3 text-right font-mono font-bold text-red-600">
+                            ₹{(item.disputeAmount || 0).toLocaleString("en-IN")}
+                          </TableCell>
+                          <TableCell className="py-3 text-right">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleOpenInvoiceModal(invoice, item.id)}
+                              className="h-7 text-xs border-slate-300"
+                            >
+                              Review
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={5} className="py-10 text-center text-sm text-slate-500">
+                          {searchQuery ? "No disputes match your search." : "There are no active disputes."}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          {activeMenu === "Vendor Settings" && (
+            <Card className="shadow-none border-slate-200 bg-white">
+              <CardHeader className="p-4 border-b border-slate-200">
+                <CardTitle className="text-sm font-bold text-slate-900">Vendor Settings</CardTitle>
+                <CardDescription className="text-xs text-slate-500 mt-0.5">
+                  Review Vecto Logistics vendor details and manage AP notification preferences.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6 p-5">
+                <div className="grid gap-4 border-b border-slate-200 pb-5 sm:grid-cols-3">
+                  <div>
+                    <span className="block text-[10px] font-semibold uppercase text-slate-500">Vendor</span>
+                    <span className="mt-1 block text-sm font-semibold text-slate-900">Vecto Logistics India Pvt Ltd</span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-semibold uppercase text-slate-500">GSTIN</span>
+                    <span className="mt-1 block font-mono text-sm text-slate-800">27AABCV1234F1Z5</span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-semibold uppercase text-slate-500">Payment Terms</span>
+                    <span className="mt-1 block text-sm font-semibold text-slate-900">Net 30</span>
+                  </div>
+                </div>
+
+                <form onSubmit={handleSaveVendorSettings} className="max-w-2xl space-y-5">
+                  <div className="space-y-1.5">
+                    <label htmlFor="ap-contact-email" className="text-xs font-semibold text-slate-700">AP notification email</label>
+                    <Input
+                      id="ap-contact-email"
+                      type="email"
+                      required
+                      value={apContactEmail}
+                      onChange={(event) => {
+                        setApContactEmail(event.target.value);
+                        setSettingsSaved(false);
+                      }}
+                      className="max-w-md text-sm"
+                    />
+                  </div>
+
+                  <fieldset className="space-y-3">
+                    <legend className="text-xs font-semibold text-slate-700">Email notifications</legend>
+                    {([
+                      ["invoices", "New invoices and approval reminders"],
+                      ["disputes", "Dispute updates and resolutions"],
+                      ["payments", "Payment confirmations"],
+                    ] as const).map(([key, label]) => (
+                      <label key={key} className="flex max-w-md items-center justify-between border-b border-slate-200 py-2 text-sm text-slate-700">
+                        <span>{label}</span>
+                        <input
+                          type="checkbox"
+                          checked={notificationPreferences[key]}
+                          onChange={(event) => {
+                            setNotificationPreferences((current) => ({
+                              ...current,
+                              [key]: event.target.checked,
+                            }));
+                            setSettingsSaved(false);
+                          }}
+                          className="h-4 w-4 accent-blue-500"
+                        />
+                      </label>
+                    ))}
+                  </fieldset>
+
+                  <div className="flex items-center gap-3">
+                    <Button type="submit" className="h-8 text-xs font-semibold">Save preferences</Button>
+                    {settingsSaved && <span role="status" className="text-xs font-medium text-emerald-600">Preferences saved for this session.</span>}
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          )}
         </main>
       </div>
 

@@ -95,6 +95,16 @@ interface GeneratedInvoice {
   status: "Paid" | "Pending" | "Overdue";
 }
 
+interface CreditNote {
+  noteNo: string;
+  invoiceNo: string;
+  clientName: string;
+  issueDate: string;
+  amount: number;
+  reason: string;
+  status: "Draft" | "Issued";
+}
+
 // Realistic Dummy Data
 const MOCK_UNBILLED_TRIPS: UnbilledTrip[] = [
   {
@@ -225,6 +235,17 @@ export default function LogisticsAccountsBilling() {
   const [activeMenu, setActiveMenu] = useState("Unbilled Trips");
   const [activeTab, setActiveTab] = useState("pending-billing");
   const [searchQuery, setSearchQuery] = useState("");
+  const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
+  const [creditNoteInvoiceNo, setCreditNoteInvoiceNo] = useState(MOCK_AR_INVOICES[0].invoiceNo);
+  const [creditNoteAmount, setCreditNoteAmount] = useState("");
+  const [creditNoteReason, setCreditNoteReason] = useState("");
+  const [apContactEmail, setApContactEmail] = useState("billing.finance@vectologistics.in");
+  const [billingPreferences, setBillingPreferences] = useState({
+    invoiceReminders: true,
+    overdueAlerts: true,
+    fridayAutoBatch: true,
+  });
+  const [settingsSaved, setSettingsSaved] = useState(false);
 
   // Multi-selection state for Unbilled Trips
   const [selectedTripIds, setSelectedTripIds] = useState<string[]>(["TRIP-8842", "TRIP-8848"]);
@@ -245,6 +266,28 @@ export default function LogisticsAccountsBilling() {
       );
     });
   }, [searchQuery]);
+
+  const filteredArInvoices = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return MOCK_AR_INVOICES.filter((invoice) =>
+      !query || `${invoice.invoiceNo} ${invoice.clientName} ${invoice.status}`.toLowerCase().includes(query),
+    );
+  }, [searchQuery]);
+
+  const filteredCreditNotes = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return creditNotes.filter((note) =>
+      !query || `${note.noteNo} ${note.invoiceNo} ${note.clientName} ${note.reason} ${note.status}`.toLowerCase().includes(query),
+    );
+  }, [creditNotes, searchQuery]);
+
+  const unbilledTotal = MOCK_UNBILLED_TRIPS.reduce(
+    (total, trip) => total + trip.freightCharge + trip.tollCharge + trip.demurrageCharge,
+    0,
+  );
+  const openArInvoices = MOCK_AR_INVOICES.filter((invoice) => invoice.status !== "Paid");
+  const openArTotal = openArInvoices.reduce((total, invoice) => total + invoice.totalAmount, 0);
+  const overdueArInvoices = MOCK_AR_INVOICES.filter((invoice) => invoice.status === "Overdue");
 
   // Selected Trips Objects
   const selectedTripsList = useMemo(() => {
@@ -293,6 +336,43 @@ export default function LogisticsAccountsBilling() {
     );
   };
 
+  const handleCreateCreditNote = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const invoice = MOCK_AR_INVOICES.find((item) => item.invoiceNo === creditNoteInvoiceNo);
+    const amount = Number(creditNoteAmount);
+    if (!invoice || invoice.status === "Paid" || !Number.isFinite(amount) || amount <= 0 || amount > invoice.totalAmount) {
+      return;
+    }
+
+    const note: CreditNote = {
+      noteNo: `VEC-CN-2026-${String(creditNotes.length + 1).padStart(4, "0")}`,
+      invoiceNo: invoice.invoiceNo,
+      clientName: invoice.clientName,
+      issueDate: new Date().toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }),
+      amount,
+      reason: creditNoteReason.trim(),
+      status: "Draft",
+    };
+    setCreditNotes((current) => [...current, note]);
+    setCreditNoteAmount("");
+    setCreditNoteReason("");
+  };
+
+  const handleIssueCreditNote = (noteNo: string) => {
+    setCreditNotes((current) => current.map((note) =>
+      note.noteNo === noteNo ? { ...note, status: "Issued" } : note,
+    ));
+  };
+
+  const handleSaveBillingPreferences = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSettingsSaved(true);
+  };
+
   return (
     <div className="flex h-screen w-full bg-slate-50 text-slate-800 font-sans antialiased overflow-hidden">
       {/* 1. LEFT SIDEBAR (Brand-Consistent Vecto Logistics) */}
@@ -336,7 +416,7 @@ export default function LogisticsAccountsBilling() {
             { name: "Dashboard", icon: LayoutDashboard },
             { name: "Unbilled Trips", icon: Receipt, badge: `${MOCK_UNBILLED_TRIPS.length}` },
             { name: "Invoices & AR", icon: FileText, badge: "₹12.5L" },
-            { name: "Credit Notes", icon: CreditCard, badge: null },
+            { name: "Credit Notes", icon: CreditCard, badge: creditNotes.length ? `${creditNotes.length}` : null },
             { name: "Settings", icon: Settings, badge: null },
           ].map((item) => {
             const Icon = item.icon;
@@ -344,11 +424,14 @@ export default function LogisticsAccountsBilling() {
             return (
               <button
                 key={item.name}
+                type="button"
                 onClick={() => {
                   setActiveMenu(item.name);
                   if (item.name === "Unbilled Trips") setActiveTab("pending-billing");
                   if (item.name === "Invoices & AR") setActiveTab("ar-invoices");
+                  setSearchQuery("");
                 }}
+                aria-current={isActive ? "page" : undefined}
                 className={`w-full flex items-center space-x-3 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
                   isActive
                     ? "bg-slate-900 text-white shadow-xs"
@@ -380,7 +463,7 @@ export default function LogisticsAccountsBilling() {
           </span>
           <div className="space-y-1">
             <Link
-              href="/"
+              href="/dispatch"
               className="flex items-center justify-between text-xs text-slate-600 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100 transition-colors"
             >
               <span className="flex items-center gap-1.5 font-medium">
@@ -422,7 +505,8 @@ export default function LogisticsAccountsBilling() {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
             <Input
               type="text"
-              placeholder="Search by Client, Invoice No, Trip ID..."
+              placeholder={activeMenu === "Settings" ? "Search unavailable in Settings" : "Search by Client, Invoice No, Trip ID..."}
+              disabled={activeMenu === "Settings"}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="h-8 pl-8 text-xs bg-slate-50/50 border-slate-200 focus-visible:bg-white"
@@ -469,6 +553,157 @@ export default function LogisticsAccountsBilling() {
             </div>
           )}
 
+          {activeMenu === "Dashboard" && (
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {[
+                  { label: "Unbilled Trips", value: MOCK_UNBILLED_TRIPS.length.toString(), meta: `₹${unbilledTotal.toLocaleString("en-IN")} ready to bill`, icon: Receipt },
+                  { label: "Open Receivables", value: `₹${openArTotal.toLocaleString("en-IN")}`, meta: `${openArInvoices.length} open invoices`, icon: FileText },
+                  { label: "Overdue Invoices", value: overdueArInvoices.length.toString(), meta: `₹${overdueArInvoices.reduce((sum, invoice) => sum + invoice.totalAmount, 0).toLocaleString("en-IN")} outstanding`, icon: Clock },
+                  { label: "Generated Invoices", value: MOCK_AR_INVOICES.length.toString(), meta: `${MOCK_AR_INVOICES.filter((invoice) => invoice.status === "Paid").length} paid`, icon: CheckCircle2 },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <Card key={item.label} className="shadow-none border-slate-200 bg-white">
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between text-xs text-slate-600">
+                          <span>{item.label}</span><Icon className="h-4 w-4 text-blue-600" />
+                        </div>
+                        <div className="mt-2 text-xl font-bold text-slate-900">{item.value}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">{item.meta}</div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+
+              <Card className="shadow-none border-slate-200 bg-white">
+                <CardHeader className="p-4 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
+                  <div>
+                    <CardTitle className="text-sm font-semibold text-slate-900">Recent Accounts Receivable</CardTitle>
+                    <CardDescription className="mt-0.5 text-xs text-slate-500">Latest generated invoices and collection status.</CardDescription>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => { setActiveMenu("Invoices & AR"); setActiveTab("ar-invoices"); }} className="h-7 text-xs border-slate-300">Open AR Ledger</Button>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader className="bg-slate-50/75"><TableRow className="border-b border-slate-200">
+                      <TableHead className="py-2.5 text-xs font-semibold text-slate-600">Invoice</TableHead>
+                      <TableHead className="py-2.5 text-xs font-semibold text-slate-600">Client</TableHead>
+                      <TableHead className="py-2.5 text-xs font-semibold text-slate-600">Due Date</TableHead>
+                      <TableHead className="py-2.5 text-right text-xs font-semibold text-slate-600">Total</TableHead>
+                      <TableHead className="py-2.5 text-center text-xs font-semibold text-slate-600">Status</TableHead>
+                    </TableRow></TableHeader>
+                    <TableBody>
+                      {MOCK_AR_INVOICES.slice(0, 4).map((invoice) => (
+                        <TableRow key={invoice.invoiceNo} className="border-b border-slate-200 text-xs">
+                          <TableCell className="py-2.5 font-mono font-bold text-slate-900">{invoice.invoiceNo}</TableCell>
+                          <TableCell className="py-2.5 text-slate-700">{invoice.clientName}</TableCell>
+                          <TableCell className="py-2.5 font-mono text-slate-600">{invoice.dueDate}</TableCell>
+                          <TableCell className="py-2.5 text-right font-mono font-bold text-slate-900">₹{invoice.totalAmount.toLocaleString("en-IN")}</TableCell>
+                          <TableCell className="py-2.5 text-center"><Badge variant="outline" className={invoice.status === "Paid" ? "bg-emerald-50 text-emerald-700 border-emerald-300" : invoice.status === "Overdue" ? "bg-red-50 text-red-700 border-red-300" : "bg-amber-50 text-amber-700 border-amber-300"}>{invoice.status}</Badge></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {activeMenu === "Credit Notes" && (
+            <div className="grid gap-4 xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.2fr)]">
+              <Card className="shadow-none border-slate-200 bg-white">
+                <CardHeader className="p-4 border-b border-slate-200">
+                  <CardTitle className="text-sm font-semibold text-slate-900">Create Credit Note</CardTitle>
+                  <CardDescription className="mt-0.5 text-xs text-slate-500">Link a credit adjustment to an open invoice.</CardDescription>
+                </CardHeader>
+                <CardContent className="p-4">
+                  <form onSubmit={handleCreateCreditNote} className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="credit-invoice" className="text-xs font-semibold text-slate-700">Open invoice</Label>
+                      <select id="credit-invoice" value={creditNoteInvoiceNo} onChange={(event) => setCreditNoteInvoiceNo(event.target.value)} className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-900">
+                        {openArInvoices.map((invoice) => <option key={invoice.invoiceNo} value={invoice.invoiceNo}>{invoice.invoiceNo} · ₹{invoice.totalAmount.toLocaleString("en-IN")}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="credit-amount" className="text-xs font-semibold text-slate-700">Credit amount (₹)</Label>
+                      <Input id="credit-amount" type="number" min="1" max={MOCK_AR_INVOICES.find((invoice) => invoice.invoiceNo === creditNoteInvoiceNo)?.totalAmount} step="1" required value={creditNoteAmount} onChange={(event) => setCreditNoteAmount(event.target.value)} className="h-9 text-xs" placeholder="Enter amount" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="credit-reason" className="text-xs font-semibold text-slate-700">Reason</Label>
+                      <Input id="credit-reason" required maxLength={160} value={creditNoteReason} onChange={(event) => setCreditNoteReason(event.target.value)} className="h-9 text-xs" placeholder="e.g. Freight adjustment" />
+                    </div>
+                    <Button type="submit" className="h-8 bg-blue-600 text-xs font-semibold text-white hover:bg-blue-500">Save Draft Credit Note</Button>
+                  </form>
+                </CardContent>
+              </Card>
+
+              <Card className="shadow-none border-slate-200 bg-white">
+                <CardHeader className="p-4 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
+                  <div><CardTitle className="text-sm font-semibold text-slate-900">Credit Notes</CardTitle><CardDescription className="mt-0.5 text-xs text-slate-500">Draft and issued adjustments.</CardDescription></div>
+                  <Badge variant="outline" className="font-mono text-xs">{filteredCreditNotes.length} Notes</Badge>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader className="bg-slate-50/75"><TableRow className="border-b border-slate-200">
+                      <TableHead className="py-2.5 text-xs font-semibold text-slate-600">Credit Note</TableHead>
+                      <TableHead className="py-2.5 text-xs font-semibold text-slate-600">Invoice / Client</TableHead>
+                      <TableHead className="py-2.5 text-xs font-semibold text-slate-600">Reason</TableHead>
+                      <TableHead className="py-2.5 text-right text-xs font-semibold text-slate-600">Amount</TableHead>
+                      <TableHead className="py-2.5 text-center text-xs font-semibold text-slate-600">Status</TableHead>
+                      <TableHead className="py-2.5 text-right text-xs font-semibold text-slate-600">Action</TableHead>
+                    </TableRow></TableHeader>
+                    <TableBody>
+                      {filteredCreditNotes.length ? filteredCreditNotes.map((note) => (
+                        <TableRow key={note.noteNo} className="border-b border-slate-200 text-xs">
+                          <TableCell className="py-2.5 font-mono font-bold text-slate-900">{note.noteNo}<span className="block text-[10px] font-normal text-slate-500">{note.issueDate}</span></TableCell>
+                          <TableCell className="py-2.5"><div className="font-mono text-slate-800">{note.invoiceNo}</div><div className="text-[10px] text-slate-500">{note.clientName}</div></TableCell>
+                          <TableCell className="py-2.5 text-slate-700">{note.reason}</TableCell>
+                          <TableCell className="py-2.5 text-right font-mono font-bold text-slate-900">₹{note.amount.toLocaleString("en-IN")}</TableCell>
+                          <TableCell className="py-2.5 text-center"><Badge variant="outline" className={note.status === "Issued" ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-amber-50 text-amber-700 border-amber-300"}>{note.status}</Badge></TableCell>
+                          <TableCell className="py-2.5 text-right"><Button type="button" variant="outline" size="sm" disabled={note.status === "Issued"} onClick={() => handleIssueCreditNote(note.noteNo)} className="h-7 text-[10px]">{note.status === "Issued" ? "Issued" : "Issue"}</Button></TableCell>
+                        </TableRow>
+                      )) : (
+                        <TableRow><TableCell colSpan={6} className="py-10 text-center text-sm text-slate-500">No credit notes yet. Create a draft to begin.</TableCell></TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {activeMenu === "Settings" && (
+            <Card className="max-w-3xl shadow-none border-slate-200 bg-white">
+              <CardHeader className="p-4 border-b border-slate-200">
+                <CardTitle className="text-sm font-semibold text-slate-900">Accounts & Billing Settings</CardTitle>
+                <CardDescription className="mt-0.5 text-xs text-slate-500">Manage billing alerts and invoice batching preferences.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5 p-5">
+                <div className="grid gap-4 border-b border-slate-200 pb-4 sm:grid-cols-3">
+                  <div><div className="text-[10px] uppercase text-slate-500">Legal Entity</div><div className="mt-1 text-sm font-semibold text-slate-900">Vecto Logistics India Pvt Ltd</div></div>
+                  <div><div className="text-[10px] uppercase text-slate-500">GSTIN</div><div className="mt-1 font-mono text-sm text-slate-800">27AABCV1234F1Z5</div></div>
+                  <div><div className="text-[10px] uppercase text-slate-500">GST Cycle</div><div className="mt-1 text-sm font-semibold text-slate-900">Oct 2026</div></div>
+                </div>
+                <form onSubmit={handleSaveBillingPreferences} className="max-w-xl space-y-4">
+                  <div className="space-y-1.5"><Label htmlFor="billing-contact" className="text-xs font-semibold text-slate-700">Billing notification email</Label><Input id="billing-contact" type="email" required value={apContactEmail} onChange={(event) => { setApContactEmail(event.target.value); setSettingsSaved(false); }} className="h-9 max-w-md text-xs" /></div>
+                  <fieldset className="space-y-2"><legend className="text-xs font-semibold text-slate-700">Billing preferences</legend>
+                    {([
+                      ["invoiceReminders", "Invoice approval and payment reminders"],
+                      ["overdueAlerts", "Overdue receivable alerts"],
+                      ["fridayAutoBatch", "Friday 18:00 IST invoice batching"],
+                    ] as const).map(([key, label]) => (
+                      <label key={key} className="flex max-w-md items-center justify-between border-b border-slate-200 py-2 text-xs text-slate-700"><span>{label}</span><input type="checkbox" checked={billingPreferences[key]} onChange={(event) => { setBillingPreferences((current) => ({ ...current, [key]: event.target.checked })); setSettingsSaved(false); }} className="h-4 w-4 accent-blue-500" /></label>
+                    ))}
+                  </fieldset>
+                  <div className="flex items-center gap-3"><Button type="submit" className="h-8 bg-blue-600 text-xs font-semibold text-white hover:bg-blue-500">Save Settings</Button>{settingsSaved && <span role="status" className="text-xs font-medium text-emerald-600">Settings saved for this session.</span>}</div>
+                </form>
+              </CardContent>
+            </Card>
+          )}
+
+          {(activeMenu === "Unbilled Trips" || activeMenu === "Invoices & AR") && (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-4">
             {/* Tab Navigation Pill Bar */}
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
@@ -675,7 +910,7 @@ export default function LogisticsAccountsBilling() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {MOCK_AR_INVOICES.map((inv) => (
+                      {filteredArInvoices.map((inv) => (
                         <TableRow key={inv.invoiceNo} className="border-b border-slate-200 text-xs">
                           <TableCell className="py-2.5 font-mono font-bold text-slate-900">
                             {inv.invoiceNo}
@@ -728,9 +963,10 @@ export default function LogisticsAccountsBilling() {
               </Card>
             </TabsContent>
           </Tabs>
+          )}
 
           {/* STICKY BOTTOM ACTION BAR (Appears when rows are selected in Tab 1) */}
-          {activeTab === "pending-billing" && selectedTripIds.length > 0 && (
+          {activeMenu === "Unbilled Trips" && activeTab === "pending-billing" && selectedTripIds.length > 0 && (
             <div className="fixed bottom-6 left-72 right-8 z-30 animate-in slide-in-from-bottom-4 duration-200">
               <div className="bg-slate-900 text-white rounded-xl p-3.5 px-5 shadow-2xl border border-slate-800 flex items-center justify-between">
                 <div className="flex items-center space-x-6">

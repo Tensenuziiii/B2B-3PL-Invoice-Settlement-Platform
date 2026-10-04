@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import {
   FileCheck2,
@@ -207,10 +207,84 @@ const MOCK_AUDIT_QUEUE: AuditTripItem[] = [
   },
 ];
 
+const MOCK_ARCHIVED_TRIPS = [
+  {
+    id: "TRIP-8818",
+    invoiceNo: "INV-2026-6512",
+    clientName: "Metro Cash & Carry India",
+    driverName: "Manjunath S.",
+    route: "Hosur DC → Whitefield DC",
+    resolvedOn: "30-Sep-2026",
+    resolution: "Approved",
+    settlement: 24500,
+  },
+  {
+    id: "TRIP-8809",
+    invoiceNo: "INV-2026-6044",
+    clientName: "Tata Motors Commercial Parts",
+    driverName: "Rajesh Kumar",
+    route: "Bhiwandi Hub → Sanand Plant",
+    resolvedOn: "28-Sep-2026",
+    resolution: "Adjusted",
+    settlement: 46000,
+  },
+];
+
+interface AuditSettings {
+  auditSlaHours: number;
+  cashVarianceThreshold: number;
+  autoFlagCashVariance: boolean;
+  requireReceiverSignature: boolean;
+  requireConsigneeStamp: boolean;
+  notifyDispatch: boolean;
+  notifyAccounts: boolean;
+}
+
+type AuditToggleSetting = keyof Pick<
+  AuditSettings,
+  | "autoFlagCashVariance"
+  | "requireReceiverSignature"
+  | "requireConsigneeStamp"
+  | "notifyDispatch"
+  | "notifyAccounts"
+>;
+
+const AUDIT_SETTINGS_KEY = "vecto-audit-settings-demo";
+const DEFAULT_AUDIT_SETTINGS: AuditSettings = {
+  auditSlaHours: 2,
+  cashVarianceThreshold: 500,
+  autoFlagCashVariance: true,
+  requireReceiverSignature: true,
+  requireConsigneeStamp: true,
+  notifyDispatch: true,
+  notifyAccounts: true,
+};
+
+const AUDIT_TOGGLE_SETTINGS: { key: AuditToggleSetting; label: string; description: string }[] = [
+  { key: "autoFlagCashVariance", label: "Auto-flag COD variances", description: "Flag trips when cash variance exceeds the threshold." },
+  { key: "requireReceiverSignature", label: "Require receiver signature", description: "Keep approval blocked until a receiver signature is present." },
+  { key: "requireConsigneeStamp", label: "Require consignee stamp", description: "Require a verified consignee stamp on the delivery record." },
+  { key: "notifyDispatch", label: "Notify dispatch on disputes", description: "Send dispute notices to the dispatch review desk." },
+  { key: "notifyAccounts", label: "Notify accounts on resolution", description: "Notify billing when an audit case is resolved." },
+];
+
 export default function InternalAuditWorkspace() {
   const [activeMenu, setActiveMenu] = useState("Audit Queue");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTripId, setSelectedTripId] = useState<string>("TRIP-8842");
+  const [auditSettings, setAuditSettings] = useState<AuditSettings>(DEFAULT_AUDIT_SETTINGS);
+  const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const savedSettings = localStorage.getItem(AUDIT_SETTINGS_KEY);
+      if (savedSettings) {
+        setAuditSettings({ ...DEFAULT_AUDIT_SETTINGS, ...JSON.parse(savedSettings) });
+      }
+    } catch {
+      setSettingsNotice("Saved settings could not be loaded. Defaults are active.");
+    }
+  }, []);
 
   // Document Viewer Controls State
   const [zoomLevel, setZoomLevel] = useState<number>(1);
@@ -238,6 +312,24 @@ export default function InternalAuditWorkspace() {
       MOCK_AUDIT_QUEUE[0]
     );
   }, [selectedTripId]);
+  const flaggedTrips = MOCK_AUDIT_QUEUE.filter((trip) => trip.status === "Flagged");
+  const visibleDisputes = flaggedTrips.filter((trip) =>
+    `${trip.id} ${trip.invoiceNo} ${trip.lrNumber} ${trip.driverName} ${trip.clientName}`
+      .toLowerCase()
+      .includes(searchQuery.trim().toLowerCase())
+  );
+  const visibleQueueTrips = MOCK_AUDIT_QUEUE.filter((trip) =>
+    `${trip.id} ${trip.invoiceNo} ${trip.lrNumber} ${trip.driverName} ${trip.clientName}`
+      .toLowerCase()
+      .includes(searchQuery.trim().toLowerCase())
+  );
+  const visibleArchivedTrips = MOCK_ARCHIVED_TRIPS.filter((trip) =>
+    `${trip.id} ${trip.invoiceNo} ${trip.driverName} ${trip.clientName} ${trip.route}`
+      .toLowerCase()
+      .includes(searchQuery.trim().toLowerCase())
+  );
+  const selectedDispute =
+    flaggedTrips.find((trip) => trip.id === selectedTripId) ?? flaggedTrips[0];
 
   // Document Controls
   const handleZoomIn = () => setZoomLevel((prev) => Math.min(prev + 0.25, 2.5));
@@ -278,6 +370,25 @@ export default function InternalAuditWorkspace() {
       `⚠ DISCREPANCY LOGGED for ${activeTrip.id}!\nReason: ${discrepancyReason}\nTrip marked as FLAGGED and reassigned to Dispatch Dispute Desk.`
     );
     setIsDisputeModalOpen(false);
+  };
+
+  const handleSaveSettings = () => {
+    try {
+      localStorage.setItem(AUDIT_SETTINGS_KEY, JSON.stringify(auditSettings));
+      setSettingsNotice("Settings saved in this browser.");
+    } catch {
+      setSettingsNotice("Settings could not be saved in this browser.");
+    }
+  };
+
+  const handleResetSettings = () => {
+    setAuditSettings(DEFAULT_AUDIT_SETTINGS);
+    try {
+      localStorage.removeItem(AUDIT_SETTINGS_KEY);
+      setSettingsNotice("Default settings restored.");
+    } catch {
+      setSettingsNotice("Defaults restored for this session.");
+    }
   };
 
   return (
@@ -330,7 +441,12 @@ export default function InternalAuditWorkspace() {
             return (
               <button
                 key={item.name}
-                onClick={() => setActiveMenu(item.name)}
+                onClick={() => {
+                  setActiveMenu(item.name);
+                  if (item.name === "Dispute Resolutions" && flaggedTrips[0]) {
+                    setSelectedTripId(flaggedTrips[0].id);
+                  }
+                }}
                 className={`w-full flex items-center space-x-3 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
                   isActive
                     ? "bg-slate-900 text-white shadow-xs"
@@ -363,7 +479,7 @@ export default function InternalAuditWorkspace() {
             Active Review Queue
           </span>
           <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
-            {MOCK_AUDIT_QUEUE.map((trip) => (
+            {visibleQueueTrips.map((trip) => (
               <button
                 key={trip.id}
                 onClick={() => setSelectedTripId(trip.id)}
@@ -393,6 +509,9 @@ export default function InternalAuditWorkspace() {
                 </div>
               </button>
             ))}
+            {visibleQueueTrips.length === 0 && (
+              <p className="px-2 py-4 text-center text-[11px] text-slate-500">No trips match your search.</p>
+            )}
           </div>
         </div>
 
@@ -400,7 +519,7 @@ export default function InternalAuditWorkspace() {
         <div className="p-3 border-t border-slate-200 bg-slate-50/50 mt-auto">
           <div className="space-y-1.5">
             <Link
-              href="/"
+              href="/dispatch"
               className="flex items-center justify-between text-xs text-slate-600 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100 transition-colors"
             >
               <span className="flex items-center gap-1.5 font-medium">
@@ -467,7 +586,257 @@ export default function InternalAuditWorkspace() {
           </div>
         </header>
 
-        {/* 3. MAIN CONTENT: SPLIT-PANE DOCUMENT REVIEW LAYOUT (50/50) */}
+        {activeMenu === "Settings" ? (
+          <div className="flex-1 overflow-y-auto bg-slate-50 p-5 sm:p-7">
+            <div className="mx-auto max-w-5xl space-y-5">
+              <div>
+                <div className="mb-2 flex items-center gap-2 text-[10px] font-bold tracking-[0.16em] text-slate-500">
+                  <Settings className="h-3.5 w-3.5" /> AUDIT CONFIGURATION
+                </div>
+                <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
+                <p className="mt-1 text-xs text-slate-600">Configure review thresholds and evidence requirements for this demo workspace.</p>
+              </div>
+
+              <Card className="border-slate-200 bg-white shadow-none">
+                <CardHeader className="border-b border-slate-200 p-4">
+                  <CardTitle className="text-sm font-bold text-slate-900">Review policy</CardTitle>
+                  <CardDescription className="mt-1 text-[11px]">Set the audit response window and COD variance limit.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 p-4 sm:grid-cols-2">
+                  <label className="grid gap-2 text-xs font-semibold text-slate-700" htmlFor="audit-sla">
+                    Audit SLA (hours)
+                    <input
+                      id="audit-sla"
+                      type="number"
+                      min={1}
+                      max={24}
+                      value={auditSettings.auditSlaHours}
+                      onChange={(event) => setAuditSettings((current) => ({ ...current, auditSlaHours: Math.min(24, Math.max(1, Number(event.target.value) || 1)) }))}
+                      className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-xs font-normal text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="grid gap-2 text-xs font-semibold text-slate-700" htmlFor="cash-threshold">
+                    COD variance threshold (₹)
+                    <input
+                      id="cash-threshold"
+                      type="number"
+                      min={0}
+                      step={100}
+                      value={auditSettings.cashVarianceThreshold}
+                      onChange={(event) => setAuditSettings((current) => ({ ...current, cashVarianceThreshold: Math.max(0, Number(event.target.value) || 0) }))}
+                      className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-xs font-normal text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                </CardContent>
+              </Card>
+
+              <Card className="border-slate-200 bg-white shadow-none">
+                <CardHeader className="border-b border-slate-200 p-4">
+                  <CardTitle className="text-sm font-bold text-slate-900">Evidence &amp; notifications</CardTitle>
+                  <CardDescription className="mt-1 text-[11px]">Choose which checks and stakeholder updates are enabled.</CardDescription>
+                </CardHeader>
+                <CardContent className="divide-y divide-slate-200 px-4">
+                  {AUDIT_TOGGLE_SETTINGS.map((setting) => (
+                    <label key={setting.key} className="flex cursor-pointer items-center justify-between gap-4 py-3">
+                      <span>
+                        <span className="block text-xs font-semibold text-slate-800">{setting.label}</span>
+                        <span className="mt-1 block text-[10px] text-slate-500">{setting.description}</span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={auditSettings[setting.key]}
+                        onChange={(event) => setAuditSettings((current) => ({ ...current, [setting.key]: event.target.checked }))}
+                        className="h-4 w-4 shrink-0 accent-blue-600"
+                      />
+                    </label>
+                  ))}
+                </CardContent>
+              </Card>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="m-0 text-[10px] text-slate-500" role="status" aria-live="polite">{settingsNotice ?? "Changes are saved only when you select Save settings."}</p>
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="outline" onClick={handleResetSettings} className="border-slate-300 text-slate-700">
+                    <RefreshCw className="mr-2 h-3.5 w-3.5" /> Reset defaults
+                  </Button>
+                  <Button type="button" onClick={handleSaveSettings} className="bg-slate-900 text-white hover:bg-slate-800">
+                    <CheckCircle2 className="mr-2 h-4 w-4" /> Save settings
+                  </Button>
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-500">These demo preferences are stored in this browser and do not update backend policy.</p>
+            </div>
+          </div>
+        ) : activeMenu === "Dispute Resolutions" ? (
+          <div className="flex-1 overflow-y-auto bg-slate-50 p-5 sm:p-7">
+            <div className="mx-auto max-w-6xl space-y-5">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <div className="mb-2 flex items-center gap-2 text-[10px] font-bold tracking-[0.16em] text-red-600">
+                    <AlertOctagon className="h-3.5 w-3.5" /> VARIANCE MANAGEMENT
+                  </div>
+                  <h1 className="text-2xl font-bold text-slate-900">Dispute Resolutions</h1>
+                  <p className="mt-1 text-xs text-slate-600">Review flagged trips, compare reported values, and return to the supporting evidence.</p>
+                </div>
+                <Badge variant="outline" className="flex items-center gap-1.5 border-red-200 bg-red-50 text-red-700">
+                  <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                  {flaggedTrips.length} open {flaggedTrips.length === 1 ? "dispute" : "disputes"}
+                </Badge>
+              </div>
+
+              <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+                <Card className="border-slate-200 bg-white shadow-none">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-slate-200 p-4">
+                    <div>
+                      <CardTitle className="text-sm font-bold text-slate-900">Open disputes</CardTitle>
+                      <CardDescription className="mt-1 text-[11px]">Flagged trips requiring settlement review</CardDescription>
+                    </div>
+                    <AlertOctagon className="h-4 w-4 text-red-500" />
+                  </CardHeader>
+                  <CardContent className="space-y-2 p-3">
+                    {visibleDisputes.map((trip) => {
+                      const cashShortfall = Math.max(trip.expectedCod - trip.reportedCod, 0);
+                      const expenseVariance =
+                        trip.reportedExpenses.toll + trip.reportedExpenses.fuel + trip.reportedExpenses.allowance -
+                        trip.systemAllowedExpenses.toll - trip.systemAllowedExpenses.fuel - trip.systemAllowedExpenses.allowance;
+                      const isSelected = selectedDispute?.id === trip.id;
+                      return (
+                        <button
+                          key={trip.id}
+                          type="button"
+                          onClick={() => setSelectedTripId(trip.id)}
+                          aria-pressed={isSelected}
+                          className={`w-full rounded-lg border p-3 text-left transition-colors ${isSelected ? "border-blue-300 bg-blue-50/60" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="font-mono text-xs font-bold text-slate-900">{trip.id}</span>
+                            <Badge variant="outline" className="border-red-200 bg-red-50 text-[9px] text-red-700">Flagged</Badge>
+                          </div>
+                          <div className="mt-2 text-xs font-semibold text-slate-800">{trip.clientName}</div>
+                          <div className="mt-1 text-[10px] text-slate-500">{trip.invoiceNo} <span className="mx-1">·</span> {trip.driverName}</div>
+                          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 border-t border-slate-200/70 pt-2 text-[10px]">
+                            <span className="text-slate-600">COD shortfall <strong className="ml-1 text-red-700">₹{cashShortfall.toLocaleString("en-IN")}</strong></span>
+                            <span className="text-slate-600">Expense variance <strong className={`ml-1 ${expenseVariance > 0 ? "text-amber-700" : "text-emerald-700"}`}>{expenseVariance > 0 ? "+" : ""}₹{expenseVariance.toLocaleString("en-IN")}</strong></span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                    {visibleDisputes.length === 0 && (
+                      <div className="px-4 py-10 text-center text-xs text-slate-500">No disputes match this search.</div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {selectedDispute ? (
+                  <Card className="border-slate-200 bg-white shadow-none">
+                    <CardHeader className="border-b border-slate-200 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <CardDescription className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Selected case</CardDescription>
+                          <CardTitle className="mt-1 text-base font-bold text-slate-900">{selectedDispute.id}</CardTitle>
+                        </div>
+                        <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">Requires resolution</Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4 p-4">
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        <div><span className="block text-[10px] text-slate-500">Invoice</span><span className="mt-1 block font-mono font-semibold text-slate-800">{selectedDispute.invoiceNo}</span></div>
+                        <div><span className="block text-[10px] text-slate-500">Vehicle</span><span className="mt-1 block font-mono font-semibold text-slate-800">{selectedDispute.regNo}</span></div>
+                        <div><span className="block text-[10px] text-slate-500">Expected COD</span><span className="mt-1 block font-semibold text-slate-800">₹{selectedDispute.expectedCod.toLocaleString("en-IN")}</span></div>
+                        <div><span className="block text-[10px] text-slate-500">Reported COD</span><span className="mt-1 block font-semibold text-slate-800">₹{selectedDispute.reportedCod.toLocaleString("en-IN")}</span></div>
+                      </div>
+                      <div className="rounded-md border border-red-200 bg-red-50/60 p-3">
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-red-800">Cash variance</div>
+                        <div className="mt-1 text-lg font-bold text-red-700">-₹{Math.max(selectedDispute.expectedCod - selectedDispute.reportedCod, 0).toLocaleString("en-IN")}</div>
+                        <p className="mb-0 mt-1 text-[10px] leading-4 text-red-800">Reported remittance is below the expected COD amount. Verify the POD and expense evidence before closing this case.</p>
+                      </div>
+                      <div className="flex items-start gap-2 text-[11px] text-slate-600">
+                        <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-600" />
+                        <span>{selectedDispute.origin} <ArrowRight className="mx-1 inline h-3 w-3" /> {selectedDispute.destination}</span>
+                      </div>
+                      <Button type="button" onClick={() => setActiveMenu("Audit Queue")} className="w-full bg-slate-900 text-white hover:bg-slate-800">
+                        <Eye className="mr-2 h-4 w-4" /> Review evidence
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card className="border-slate-200 bg-white shadow-none">
+                    <CardContent className="p-10 text-center text-xs text-slate-500">No open disputes are available.</CardContent>
+                  </Card>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : activeMenu === "Archived Trips" ? (
+          <div className="flex-1 overflow-y-auto bg-slate-50 p-5 sm:p-7">
+            <div className="mx-auto max-w-6xl space-y-5">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <div className="mb-2 flex items-center gap-2 text-[10px] font-bold tracking-[0.16em] text-slate-500">
+                    <Archive className="h-3.5 w-3.5" /> AUDIT HISTORY
+                  </div>
+                  <h1 className="text-2xl font-bold text-slate-900">Archived Trips &amp; Resolutions</h1>
+                  <p className="mt-1 text-xs text-slate-600">Completed audit cases and their final settlement outcomes.</p>
+                </div>
+                <Badge variant="outline" className="border-slate-200 bg-white text-slate-700">
+                  {visibleArchivedTrips.length} records
+                </Badge>
+              </div>
+
+              <Card className="overflow-hidden border-slate-200 bg-white shadow-none">
+                <CardHeader className="border-b border-slate-200 p-4">
+                  <CardTitle className="text-sm font-bold text-slate-900">Resolution history</CardTitle>
+                  <CardDescription className="mt-1 text-[11px]">Search by trip, invoice, driver, client, or route using the header search.</CardDescription>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader className="bg-slate-50/75 text-[10px]">
+                        <TableRow>
+                          <TableHead>Trip / Invoice</TableHead>
+                          <TableHead>Client / Driver</TableHead>
+                          <TableHead>Route</TableHead>
+                          <TableHead>Resolved</TableHead>
+                          <TableHead>Outcome</TableHead>
+                          <TableHead className="text-right">Settlement</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody className="text-xs">
+                        {visibleArchivedTrips.map((trip) => (
+                          <TableRow key={trip.id}>
+                            <TableCell>
+                              <span className="block font-mono font-bold text-slate-900">{trip.id}</span>
+                              <span className="mt-1 block text-[10px] text-slate-500">{trip.invoiceNo}</span>
+                            </TableCell>
+                            <TableCell>
+                              <span className="block font-medium text-slate-800">{trip.clientName}</span>
+                              <span className="mt-1 block text-[10px] text-slate-500">{trip.driverName}</span>
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap text-slate-600">{trip.route}</TableCell>
+                            <TableCell className="whitespace-nowrap text-slate-600">{trip.resolvedOn}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={trip.resolution === "Adjusted" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}>
+                                {trip.resolution}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right font-mono font-semibold text-slate-800">₹{trip.settlement.toLocaleString("en-IN")}</TableCell>
+                          </TableRow>
+                        ))}
+                        {visibleArchivedTrips.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={6} className="py-12 text-center text-xs text-slate-500">No archived trips match your search.</TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+              <p className="text-[10px] text-slate-500">Sample archive records for this demo workspace.</p>
+            </div>
+          </div>
+        ) : (
+        /* 3. MAIN CONTENT: SPLIT-PANE DOCUMENT REVIEW LAYOUT (50/50) */
         <div className="flex-1 grid grid-cols-12 overflow-hidden">
           
           {/* ========================================================================= */}
@@ -971,6 +1340,7 @@ export default function InternalAuditWorkspace() {
             </div>
           </section>
         </div>
+        )}
       </div>
 
       {/* DISCREPANCY REJECTION REASON MODAL */}

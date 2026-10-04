@@ -1,0 +1,413 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  DISPATCH_MANAGER
+  DRIVER
+  AUDITOR
+  ACCOUNTS
+  CLIENT_AP
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  LOCKED
+  INACTIVE
+}
+
+enum TripStatus {
+  PLANNED
+  DISPATCHED
+  IN_TRANSIT
+  DELAYED
+  ARRIVED
+  UNLOADING
+  DELIVERED
+  EOD_PENDING
+  EOD_CLOSED
+  AUDIT_PENDING
+  AUDIT_FLAGGED
+  AUDIT_VERIFIED
+  BILLED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  PUBLISHED
+  PENDING_APPROVAL
+  PARTIALLY_DISPUTED
+  APPROVED
+  PAID
+  OVERDUE
+}
+
+enum AlertSeverity {
+  INFO
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum NotificationType {
+  TRIP
+  ALERT
+  INVOICE
+  PAYMENT
+  AUDIT
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  passwordHash       String?
+  name               String
+  initials           String    @default("VL")
+  role               Role
+  status             UserStatus @default(ACTIVE)
+  failedLoginAttempts Int       @default(0)
+  lockedUntil        DateTime?
+  displayId          String
+  hubName            String?
+  clientId           String?
+  client             Client?   @relation(fields: [clientId], references: [id])
+  refreshTokens      RefreshToken[]
+  passwordResetToken PasswordResetToken[]
+  loginAttempts      LoginAttempt[]
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
+
+  @@index([role, status])
+}
+
+model RefreshToken {
+  id          String    @id @default(cuid())
+  tokenHash   String    @unique
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  familyId    String?
+  createdAt   DateTime  @default(now())
+  replacedBy  String?
+  userAgent   String?
+  ipAddress   String?
+
+  @@index([userId, revokedAt])
+  @@index([familyId, revokedAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model Hub {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  region      String?
+  city        String?
+  stateCode   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  trips       Trip[]
+}
+
+model Client {
+  id                String    @id @default(cuid())
+  name              String
+  code              String    @unique
+  gstin             String?
+  stateCode         String?
+  paymentTermsDays  Int       @default(30)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+  users             User[]
+  trips             Trip[]
+  invoices          Invoice[]
+}
+
+model Vehicle {
+  id               String    @id @default(cuid())
+  regNo            String    @unique
+  currentOdometer  Int
+  active           Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+  trips            Trip[]
+}
+
+model Driver {
+  id            String    @id @default(cuid())
+  name          String
+  phone         String
+  userId        String?   @unique
+  dutyStatus    String?   @default("OFFLINE")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+  trips         Trip[]
+}
+
+model Shift {
+  id        String    @id @default(cuid())
+  date      DateTime
+  number    Int       @default(1)
+  startAt   DateTime?
+  endAt     DateTime?
+  createdAt DateTime  @default(now())
+  trips     Trip[]
+}
+
+model Trip {
+  id              String    @id @default(cuid())
+  tripCode        String    @unique
+  status          TripStatus @default(PLANNED)
+  version         Int       @default(0)
+  hubId           String?
+  hub             Hub?      @relation(fields: [hubId], references: [id])
+  clientId        String?
+  client          Client?   @relation(fields: [clientId], references: [id])
+  driverId        String?
+  driver          Driver?   @relation(fields: [driverId], references: [id])
+  vehicleId       String?
+  vehicle         Vehicle?  @relation(fields: [vehicleId], references: [id])
+  shiftId         String?
+  shift           Shift?    @relation(fields: [shiftId], references: [id])
+  origin         String?
+  destination     String?
+  eta            DateTime?
+  startOdometer  Int?
+  currentOdometer Int?
+  delayMinutes   Int       @default(0)
+  delayReason    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+  tripStops      TripStop[]
+  lorryReceipt   LorryReceipt?
+  pod            Pod?
+  expenses       TripExpense[]
+  advances       DriverAdvance[]
+  eodTally       EodTally?
+  invoiceLine    InvoiceLine?
+
+  @@index([status, hubId])
+}
+
+model TripStop {
+  id          String   @id @default(cuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id])
+  order       Int
+  name        String?
+  address     String?
+  createdAt   DateTime @default(now())
+
+  @@index([tripId, order])
+}
+
+model LorryReceipt {
+  id            String    @id @default(cuid())
+  tripId        String    @unique
+  trip          Trip      @relation(fields: [tripId], references: [id])
+  lrNo          String    @unique
+  consignor     String?
+  consignee     String?
+  pallets       Int?
+  weightKg      Int?
+  codAmount     Int?
+  goodsDescription String?
+  createdAt     DateTime  @default(now())
+  deletedAt     DateTime?
+}
+
+model Pod {
+  id                  String    @id @default(cuid())
+  tripId              String    @unique
+  trip                Trip      @relation(fields: [tripId], references: [id])
+  photoKey            String?
+  signatureKey        String?
+  signatoryName       String?
+  designation        String?
+  dockGpsLat          Float?
+  dockGpsLng          Float?
+  gpsAccuracyPercent  Int?
+  gateInTimestamp     DateTime?
+  stampVerified      Boolean   @default(false)
+  authHash           String?
+  device             String?
+  createdAt          DateTime  @default(now())
+}
+
+model DriverAdvance {
+  id         String   @id @default(cuid())
+  tripId     String
+  trip       Trip     @relation(fields: [tripId], references: [id])
+  amount     Int
+  createdAt  DateTime @default(now())
+}
+
+model TripExpense {
+  id          String   @id @default(cuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id])
+  type        String
+  amount      Int
+  receiptRef  String?
+  createdAt   DateTime @default(now())
+}
+
+model EodTally {
+  id                   String   @id @default(cuid())
+  tripId               String   @unique
+  trip                 Trip     @relation(fields: [tripId], references: [id])
+  toll                 Int      @default(0)
+  allowance            Int      @default(0)
+  fuel                 Int      @default(0)
+  advance              Int      @default(0)
+  actualCash           Int      @default(0)
+  netExpected          Int      @default(0)
+  discrepancy          Int      @default(0)
+  createdAt            DateTime @default(now())
+}
+
+model AuditReview {
+  id              String   @id @default(cuid())
+  tripId          String
+  auditorId      String?
+  gateDistance   Boolean  @default(false)
+  gateCash       Boolean  @default(false)
+  gateSignature  Boolean  @default(false)
+  gateStamp      Boolean  @default(false)
+  gateDoc        Boolean  @default(false)
+  decision       String?
+  notes          String?
+  slaDueAt       DateTime?
+  createdAt      DateTime @default(now())
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  invoiceNumber   String        @unique
+  status         InvoiceStatus @default(DRAFT)
+  clientId       String?
+  client         Client?       @relation(fields: [clientId], references: [id])
+  issueDate      DateTime      @default(now())
+  dueDate        DateTime?
+  subtotal       Int           @default(0)
+  gst            Int           @default(0)
+  total          Int           @default(0)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  deletedAt      DateTime?
+  lines          InvoiceLine[]
+  payments       Payment[]
+
+  @@index([status, dueDate])
+  @@index([clientId, createdAt])
+}
+
+model InvoiceLine {
+  id             String    @id @default(cuid())
+  invoiceId      String
+  invoice        Invoice   @relation(fields: [invoiceId], references: [id])
+  tripId         String    @unique
+  trip           Trip      @relation(fields: [tripId], references: [id])
+  lineAmount     Int
+  gstAmount      Int
+  totalAmount    Int
+  createdAt      DateTime  @default(now())
+}
+
+model Payment {
+  id          String    @id @default(cuid())
+  invoiceId    String
+  invoice     Invoice   @relation(fields: [invoiceId], references: [id])
+  amount      Int
+  method      String?
+  paidAt      DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+}
+
+model Notification {
+  id          String             @id @default(cuid())
+  userId      String?
+  type        NotificationType?
+  title       String
+  body        String
+  readAt      DateTime?
+  createdAt   DateTime           @default(now())
+}
+
+model SystemAlert {
+  id           String        @id @default(cuid())
+  title        String
+  severity     AlertSeverity @default(MEDIUM)
+  vehicle      String?
+  source       String?
+  dismissedBy  String?
+  dismissedAt  DateTime?
+  createdAt    DateTime      @default(now())
+}
+
+model InvoiceSequence {
+  id          String   @id @default(cuid())
+  financialYear String
+  counter     Int      @default(0)
+  prefix      String   @default("INV")
+}
+
+model AuditLog {
+  id          String    @id @default(cuid())
+  actorId     String?
+  actorRole   String?
+  action      String
+  entity      String
+  entityId    String
+  beforeJson  Json?
+  afterJson   Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime  @default(now())
+}
+
+model IdempotencyKey {
+  id          String    @id @default(cuid())
+  key         String    @unique
+  endpoint    String
+  responseHash String
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+}
+
+model LoginAttempt {
+  id            String   @id @default(cuid())
+  email         String
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  succeeded     Boolean  @default(false)
+  failureReason String?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([userId, createdAt])
+  @@index([succeeded, createdAt])
+}

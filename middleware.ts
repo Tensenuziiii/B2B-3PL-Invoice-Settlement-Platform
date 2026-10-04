@@ -1,34 +1,53 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+
+const protectedRoutes = [
+  "/dispatch",
+  "/audit",
+  "/accounts",
+  "/driver",
+  "/client-portal",
+  "/admin",
+];
+
+const appAliases: Record<string, string> = {
+  "/app": "/dispatch",
+  "/app/dispatch": "/dispatch",
+  "/app/audit": "/audit",
+  "/app/accounts": "/accounts",
+  "/app/billing": "/accounts",
+  "/app/driver": "/driver",
+  "/app/client-portal": "/client-portal",
+  "/app/admin": "/admin",
+};
 
 export function middleware(request: NextRequest) {
   const token = request.cookies.get("vecto_access_token")?.value;
   const { pathname } = request.nextUrl;
+  const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/+$/, "") || "/";
 
-  // Protected route prefixes
-  const protectedRoutes = [
-    "/dispatch",
-    "/audit",
-    "/accounts",
-    "/driver",
-    "/client-portal",
-    "/admin",
-  ];
+  const aliasTarget = appAliases[normalizedPath];
 
-  const isProtected = protectedRoutes.some((route) =>
-    pathname === route || pathname.startsWith(`${route}/`)
+  if (aliasTarget) {
+    if (!token) {
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
+
+    return NextResponse.redirect(new URL(aliasTarget, request.url));
+  }
+
+  if (normalizedPath === "/") {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  const isProtected = protectedRoutes.some(
+    (route) => normalizedPath === route || normalizedPath.startsWith(`${route}/`)
   );
 
-  // If unauthenticated user tries to access a protected route, redirect to /login
   if (isProtected && !token) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("from", pathname);
     return NextResponse.redirect(loginUrl);
-  }
-
-  // If authenticated user tries to access /login, redirect to /dispatch
-  if (pathname === "/login" && token) {
-    return NextResponse.redirect(new URL("/dispatch", request.url));
   }
 
   return NextResponse.next();
@@ -36,12 +55,15 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
+    "/",
+    "/login",
     "/dispatch/:path*",
     "/audit/:path*",
     "/accounts/:path*",
     "/driver/:path*",
     "/client-portal/:path*",
     "/admin/:path*",
-    "/login",
+    "/app",
+    "/app/:path*",
   ],
 };

@@ -153,7 +153,7 @@ export default function DriverMobileWebApp() {
             <span>4G LTE</span>
             <span>94% BAT</span>
             <Link
-              href="/"
+              href="/dispatch"
               className="text-amber-400 hover:text-amber-300 font-sans text-xs underline font-medium flex items-center gap-0.5"
             >
               Dispatch UI <ExternalLink className="h-3 w-3" />
