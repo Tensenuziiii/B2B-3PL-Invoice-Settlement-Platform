@@ -1,98 +1,154 @@
-import { PrismaClient, Role } from '@prisma/client';
+import { PrismaClient, Role, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
 
 const prisma = new PrismaClient();
 
-const demoUsers = [
-  {
-    email: 'dispatch@vectologistics.in',
-    name: 'Dispatch Manager',
-    role: Role.DISPATCH_MANAGER,
-    displayId: 'DIS-04',
-  },
-  {
-    email: 'driver.rajesh@vectologistics.in',
-    name: 'Rajesh Kumar',
-    role: Role.DRIVER,
-    displayId: 'DRV-18',
-  },
-  {
-    email: 'audit.lead@vectologistics.in',
-    name: 'Audit Lead',
-    role: Role.AUDITOR,
-    displayId: 'AUD-12',
-  },
-  {
-    email: 'billing.finance@vectologistics.in',
-    name: 'Finance Ops',
-    role: Role.ACCOUNTS,
-    displayId: 'ACC-07',
-  },
-  {
-    email: 'ap.payments@metro-wholesale.in',
-    name: 'Metro Finance Team',
-    role: Role.CLIENT_AP,
-    displayId: 'AP-IND-01',
-  },
-  {
-    email: 'admin@vectologistics.in',
-    name: 'Platform Administrator',
-    role: Role.ADMIN,
-    displayId: 'ADM-01',
-  },
-];
-
 async function main() {
-  const hub = await prisma.hub.upsert({
-    where: { name: 'Western Corridor Hub #4 (Bhiwandi)' },
+  console.log('🌱 Seeding database...');
+
+  // ============================================================
+  // 1. Organization (tenant root)
+  // ============================================================
+  const org = await prisma.organization.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000001' },
     update: {},
     create: {
-      name: 'Western Corridor Hub #4 (Bhiwandi)',
-      region: 'Western Corridor',
-      city: 'Bhiwandi',
-      stateCode: 'MH',
+      id: '00000000-0000-0000-0000-000000000001',
+      name: 'Vecto Logistics',
+      legalName: 'Vecto Logistics Pvt Ltd',
+      gstin: '27AABCV1234F1Z5',
+      pan: 'AABCV1234F',
+      stateCode: '27',
+      status: 'ACTIVE',
     },
   });
+  console.log(`✓ Organization: ${org.name} (${org.id})`);
 
+  // ============================================================
+  // 2. Client
+  // ============================================================
   const client = await prisma.client.upsert({
-    where: { code: 'METRO-WHOLESALE' },
+    where: {
+      organizationId_code: {
+        organizationId: org.id,
+        code: 'METRO-WHOLESALE',
+      },
+    },
     update: {},
     create: {
-      name: 'Metro Wholesale India',
+      organizationId: org.id,
+      name: 'Metro Cash & Carry',
       code: 'METRO-WHOLESALE',
-      stateCode: 'MH',
+      gstin: '29AABCM1234F1Z2',
+      stateCode: '29',
       paymentTermsDays: 30,
     },
   });
+  console.log(`✓ Client: ${client.name}`);
 
-  const passwordHash = await argon2.hash(
-    process.env.DEMO_PASSWORD ?? 'Enterprise@2026',
-  );
+  // ============================================================
+  // 3. Users (one per role)
+  // ============================================================
+  const demoPassword = process.env.DEMO_PASSWORD ?? 'Enterprise@2026';
+  const passwordHash = await argon2.hash(demoPassword);
 
-  for (const user of demoUsers) {
+  const users: Array<{ email: string; name: string; role: Role; displayId: string; hubName?: string; clientId?: string }> = [
+    { email: 'admin@vectologistics.in',      name: 'Admin User',     role: Role.ADMIN,            displayId: 'ADM-01' },
+    { email: 'dispatch@vectologistics.in',   name: 'Dispatch Lead',  role: Role.DISPATCH_MANAGER, displayId: 'DSP-01', hubName: 'Bhiwandi Hub #4' },
+    { email: 'driver.rajesh@vectologistics.in', name: 'Rajesh Kumar', role: Role.DRIVER,          displayId: 'DRV-01' },
+    { email: 'audit.lead@vectologistics.in', name: 'Audit Lead',     role: Role.AUDITOR,          displayId: 'AUD-01' },
+    { email: 'billing.finance@vectologistics.in', name: 'Billing Lead', role: Role.ACCOUNTS,      displayId: 'ACC-01' },
+    { email: 'ap.payments@metro-wholesale.in', name: 'Metro AP Team', role: Role.CLIENT_AP,       displayId: 'CAP-01', clientId: client.id },
+    { email: 'partner@3pl-vendor.in',        name: '3PL Partner',    role: Role.VENDOR_3PL,       displayId: 'VND-01' },
+  ];
+
+  for (const u of users) {
     await prisma.user.upsert({
-      where: { email: user.email },
+      where: {
+        organizationId_email: {
+          organizationId: org.id,
+          email: u.email,
+        },
+      },
       update: {},
       create: {
-        ...user,
+        organizationId: org.id,
+        email: u.email,
+        name: u.name,
+        initials: u.name.split(' ').slice(0, 2).map(p => p[0]).join('').toUpperCase(),
         passwordHash,
-        initials: user.name
-          .split(' ')
-          .map((part) => part[0])
-          .join('')
-          .slice(0, 2)
-          .toUpperCase(),
-        hubName: hub.name,
-        clientId: user.role === Role.CLIENT_AP ? client.id : undefined,
+        role: u.role,
+        status: UserStatus.ACTIVE,
+        displayId: u.displayId,
+        hubName: u.hubName ?? null,
+        clientId: u.clientId ?? null,
       },
     });
   }
+  console.log(`✓ Users: ${users.length} created (password: ${demoPassword})`);
+
+  // ============================================================
+  // 4. Vehicle
+  // ============================================================
+  const vehicle = await prisma.vehicle.upsert({
+    where: {
+      organizationId_regNo: {
+        organizationId: org.id,
+        regNo: 'MH 12 RN 4920',
+      },
+    },
+    update: {},
+    create: {
+      organizationId: org.id,
+      regNo: 'MH 12 RN 4920',
+      currentOdometer: 142380,
+      active: true,
+    },
+  });
+  console.log(`✓ Vehicle: ${vehicle.regNo}`);
+
+  // ============================================================
+  // 5. Driver profile
+  // ============================================================
+  const driverUser = await prisma.user.findFirst({
+    where: { organizationId: org.id, email: 'driver.rajesh@vectologistics.in' },
+  });
+
+  if (driverUser) {
+    const existingDriver = await prisma.driver.findFirst({
+      where: { organizationId: org.id, userId: driverUser.id },
+    });
+
+    if (!existingDriver) {
+      await prisma.driver.create({
+        data: {
+          organizationId: org.id,
+          name: 'Rajesh Kumar',
+          phone: '+919800000001',
+          userId: driverUser.id,
+          dutyStatus: 'OFFLINE',
+        },
+      });
+      console.log('✓ Driver: Rajesh Kumar');
+    }
+  }
+
+  console.log('\n✨ Seed complete.\n');
+  console.log('Login credentials (password for all users):');
+  console.log(`  Password: ${demoPassword}`);
+  console.log('  Admin:    admin@vectologistics.in');
+  console.log('  Dispatch: dispatch@vectologistics.in');
+  console.log('  Driver:   driver.rajesh@vectologistics.in');
+  console.log('  Auditor:  audit.lead@vectologistics.in');
+  console.log('  Accounts: billing.finance@vectologistics.in');
+  console.log('  Client:   ap.payments@metro-wholesale.in');
+  console.log('  Vendor:   partner@3pl-vendor.in');
 }
 
 main()
-  .catch((error: unknown) => {
-    console.error(error);
-    process.exitCode = 1;
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
   })
   .finally(async () => {
     await prisma.$disconnect();
