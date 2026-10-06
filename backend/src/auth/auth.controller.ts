@@ -127,6 +127,24 @@ export class AuthController {
     return this.authService.acceptInvite({ token: dto.token, password: dto.password });
   }
 
+  @Get('roles')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List all roles with their permissions' })
+  listRoles() {
+    return this.authService.listRoles();
+  }
+
+  @Get('permissions')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List all permissions' })
+  listPermissions() {
+    return this.authService.listPermissions();
+  }
+
   private setRefreshCookie(res: Response, refreshToken: string) {
     res.cookie('refresh_token', refreshToken, {
       httpOnly: true,

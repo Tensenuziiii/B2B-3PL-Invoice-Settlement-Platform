@@ -128,6 +128,115 @@ async function main() {
     }
   }
 
+  // ============================================================
+  // 6. Permissions + Role → Permission mappings
+  // ============================================================
+  const permissions = [
+    // Identity
+    { code: "users:read",         category: "identity", description: "View users" },
+    { code: "users:create",       category: "identity", description: "Create users" },
+    { code: "users:update",       category: "identity", description: "Update users" },
+    { code: "users:deactivate",   category: "identity", description: "Deactivate users" },
+    { code: "roles:read",         category: "identity", description: "View roles and permissions" },
+    { code: "invitations:create", category: "identity", description: "Send invitations" },
+
+    // Master data
+    { code: "vehicles:manage",    category: "master", description: "Manage vehicles" },
+    { code: "drivers:manage",     category: "master", description: "Manage drivers" },
+    { code: "clients:manage",     category: "master", description: "Manage clients" },
+    { code: "vendors:manage",     category: "master", description: "Manage vendors" },
+    { code: "routes:manage",      category: "master", description: "Manage routes" },
+    { code: "rate_cards:manage",  category: "master", description: "Manage rate cards" },
+
+    // Trips
+    { code: "trips:read",           category: "trips", description: "View trips" },
+    { code: "trips:create",         category: "trips", description: "Create trips" },
+    { code: "trips:assign",         category: "trips", description: "Assign driver/vehicle" },
+    { code: "trips:update_status",  category: "trips", description: "Update trip status" },
+    { code: "pods:upload",          category: "trips", description: "Upload POD" },
+    { code: "collections:record",   category: "trips", description: "Record collections" },
+    { code: "expenses:record",      category: "trips", description: "Record expenses" },
+    { code: "eod:close",            category: "trips", description: "Close EOD" },
+
+    // Audit
+    { code: "audits:read",    category: "audit", description: "View audit queue" },
+    { code: "audits:review",  category: "audit", description: "Approve or request correction" },
+
+    // Invoices
+    { code: "invoices:read",     category: "invoices", description: "View invoices" },
+    { code: "invoices:create",   category: "invoices", description: "Generate invoices" },
+    { code: "invoices:approve",  category: "invoices", description: "Approve invoices (client)" },
+    { code: "disputes:create",   category: "invoices", description: "Raise disputes" },
+    { code: "disputes:resolve",  category: "invoices", description: "Resolve disputes" },
+    { code: "payments:record",   category: "invoices", description: "Record payments" },
+
+    // Settlements
+    { code: "settlements:read",   category: "settlements", description: "View settlements" },
+    { code: "settlements:create", category: "settlements", description: "Create settlements" },
+
+    // Notifications
+    { code: "notifications:read", category: "notifications", description: "Read notifications" },
+  ];
+
+  for (const p of permissions) {
+    await prisma.permission.upsert({
+      where: { code: p.code },
+      update: {},
+      create: p,
+    });
+  }
+  console.log(`✓ Permissions: ${permissions.length} seeded`);
+
+  const rolePermissionMap: Record<Role, string[]> = {
+    ADMIN: permissions.map((p) => p.code),
+
+    DISPATCH_MANAGER: [
+      "trips:read", "trips:create", "trips:assign", "trips:update_status",
+      "pods:upload", "collections:record", "expenses:record", "eod:close",
+      "vehicles:manage", "drivers:manage", "routes:manage", "clients:manage",
+      "notifications:read",
+    ],
+
+    DRIVER: [
+      "trips:read", "trips:update_status", "pods:upload",
+      "collections:record", "notifications:read",
+    ],
+
+    AUDITOR: [
+      "trips:read", "audits:read", "audits:review", "pods:upload",
+      "notifications:read",
+    ],
+
+    ACCOUNTS: [
+      "invoices:read", "invoices:create", "disputes:resolve",
+      "payments:record", "rate_cards:manage",
+      "settlements:create", "settlements:read",
+      "trips:read", "clients:manage", "notifications:read",
+    ],
+
+    CLIENT_AP: [
+      "invoices:read", "invoices:approve", "disputes:create",
+      "notifications:read",
+    ],
+
+    VENDOR_3PL: [
+      "settlements:read", "notifications:read",
+    ],
+  };
+
+  for (const [role, codes] of Object.entries(rolePermissionMap)) {
+    for (const code of codes) {
+      const perm = await prisma.permission.findUnique({ where: { code } });
+      if (!perm) continue;
+      await prisma.rolePermission.upsert({
+        where: { role_permissionId: { role: role as Role, permissionId: perm.id } },
+        update: {},
+        create: { role: role as Role, permissionId: perm.id },
+      });
+    }
+  }
+  console.log(`✓ Role permissions mapped for ${Object.keys(rolePermissionMap).length} roles`);
+
   console.log('\n✨ Seed complete.\n');
   console.log('Login credentials (password for all users):');
   console.log(`  Password: ${demoPassword}`);

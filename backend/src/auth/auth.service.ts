@@ -22,6 +22,7 @@ type TokenPayload = {
   displayId: string;
   hubName: string | null;
   orgId: string;
+  permissions: string[];
 };
 
 export type LoginRequestMetadata = {
@@ -139,6 +140,12 @@ export class AuthService {
       });
     }
 
+    const rolePerms = await this.prisma.rolePermission.findMany({
+      where: { role: user.role },
+      select: { permission: { select: { code: true } } },
+    });
+    const permissionCodes = rolePerms.map((rp) => rp.permission.code);
+
     const payload: TokenPayload = {
       sub: user.id,
       email: user.email,
@@ -146,6 +153,7 @@ export class AuthService {
       displayId: user.displayId,
       hubName: user.hubName,
       orgId: user.organizationId,
+      permissions: permissionCodes,
     };
 
     const session = await this.createSession(payload, user, metadata);
@@ -233,6 +241,12 @@ export class AuthService {
         data: { replacedBy: replacement.id },
       });
 
+      const rolePerms = await this.prisma.rolePermission.findMany({
+        where: { role: storedToken.user.role },
+        select: { permission: { select: { code: true } } },
+      });
+      const permissionCodes = rolePerms.map((rp) => rp.permission.code);
+
       const payload: TokenPayload = {
         sub: storedToken.user.id,
         email: storedToken.user.email,
@@ -240,6 +254,7 @@ export class AuthService {
         displayId: storedToken.user.displayId,
         hubName: storedToken.user.hubName,
         orgId: storedToken.user.organizationId,
+        permissions: permissionCodes,
       };
 
       return {
@@ -359,7 +374,30 @@ export class AuthService {
       role: user.role,
       displayId: user.displayId,
       hubName: user.hubName,
+      permissions: user.permissions,
     };
+  }
+
+  async listRoles() {
+    const roles = Object.values(Role);
+    const result = [];
+    for (const role of roles) {
+      const perms = await this.prisma.rolePermission.findMany({
+        where: { role },
+        select: { permission: { select: { code: true, description: true, category: true } } },
+      });
+      result.push({
+        role,
+        permissions: perms.map((p) => p.permission),
+      });
+    }
+    return result;
+  }
+
+  async listPermissions() {
+    return this.prisma.permission.findMany({
+      orderBy: [{ category: 'asc' }, { code: 'asc' }],
+    });
   }
 
   getPresets() {

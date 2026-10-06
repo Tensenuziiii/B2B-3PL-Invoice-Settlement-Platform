@@ -24,6 +24,8 @@ describe('AuthService', () => {
   let invitationCreate: jest.Mock;
   let invitationFindFirst: jest.Mock;
   let invitationUpdate: jest.Mock;
+  let rolePermissionFindMany: jest.Mock;
+  let permissionFindMany: jest.Mock;
 
   beforeEach(() => {
     findFirst = jest.fn();
@@ -42,6 +44,8 @@ describe('AuthService', () => {
     invitationCreate = jest.fn();
     invitationFindFirst = jest.fn();
     invitationUpdate = jest.fn();
+    rolePermissionFindMany = jest.fn().mockResolvedValue([]);
+    permissionFindMany = jest.fn().mockResolvedValue([]);
     const refreshToken = {
       findUnique: refreshTokenFindUnique,
       create: refreshTokenCreate,
@@ -59,6 +63,8 @@ describe('AuthService', () => {
       findFirst: invitationFindFirst,
       update: invitationUpdate,
     };
+    const rolePermission = { findMany: rolePermissionFindMany };
+    const permission = { findMany: permissionFindMany };
     service = new AuthService(
       { sign } as unknown as JwtService,
       {
@@ -67,6 +73,8 @@ describe('AuthService', () => {
         passwordResetToken,
         loginAttempt,
         invitation,
+        rolePermission,
+        permission,
         $transaction: (run: (transaction: unknown) => unknown) =>
           run({
             refreshToken,
@@ -74,6 +82,8 @@ describe('AuthService', () => {
             loginAttempt,
             user: { update: userUpdate, findFirst: userFindFirst, create: userCreate },
             invitation: { update: invitationUpdate },
+            rolePermission,
+            permission,
           }),
       } as unknown as PrismaRootService,
     );
@@ -112,6 +122,7 @@ describe('AuthService', () => {
       displayId: user.displayId,
       hubName: user.hubName,
       orgId: 'org-test-1',
+      permissions: [],
     });
     expect(result).toEqual({
       accessToken: 'signed-access-token',
