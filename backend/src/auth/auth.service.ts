@@ -367,13 +367,33 @@ export class AuthService {
     return { success: true, message: 'Password reset successfully.' };
   }
 
-  me(user: TokenPayload) {
+  async me(user: TokenPayload) {
+    const dbUser = await this.prisma.user.findFirst({
+      where: { id: user.sub },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        initials: true,
+        role: true,
+        displayId: true,
+        hubName: true,
+        status: true,
+        organizationId: true,
+        clientId: true,
+        createdAt: true,
+        organization: {
+          select: { id: true, name: true, legalName: true, gstin: true, stateCode: true },
+        },
+      },
+    });
+
+    if (!dbUser) {
+      throw new UnauthorizedException('User no longer exists.');
+    }
+
     return {
-      id: user.sub,
-      email: user.email,
-      role: user.role,
-      displayId: user.displayId,
-      hubName: user.hubName,
+      ...dbUser,
       permissions: user.permissions,
     };
   }

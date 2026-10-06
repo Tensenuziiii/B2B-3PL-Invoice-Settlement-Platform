@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
@@ -23,49 +24,61 @@ import { UsersService } from './users.service';
 @ApiBearerAuth()
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'List users with search and pagination' })
   list(@Query() query: ListUsersQueryDto) {
     return this.usersService.list(query);
   }
 
   @Post()
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Create a user with a hashed password' })
   create(@Body() dto: CreateUserDto) {
     return this.usersService.create(dto);
   }
 
   @Get('login-attempts')
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'List persisted login attempts, including unknown emails' })
   listLoginAttempts(@Query() query: ListUsersQueryDto) {
     return this.usersService.listLoginAttempts(query);
   }
 
   @Get(':id/login-history')
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'List persisted login attempts for a user' })
   loginHistory(@Param('id') id: string, @Query() query: ListUsersQueryDto) {
     return this.usersService.loginHistory(id, query.limit, query.offset);
   }
 
+  @Get('me')
+  @ApiOperation({ summary: "Get the current user's own profile" })
+  me(@Req() req: any) {
+    return this.usersService.get(req.user.sub);
+  }
+
   @Get(':id')
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Get a user profile without credential fields' })
   get(@Param('id') id: string) {
     return this.usersService.get(id);
   }
 
   @Patch(':id')
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Update user profile, role, status, or password' })
   update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
     return this.usersService.update(id, dto);
   }
 
   @Delete(':id')
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Deactivate a user and revoke active sessions' })
   deactivate(@Param('id') id: string) {
     return this.usersService.deactivate(id);
   }
-}
+}

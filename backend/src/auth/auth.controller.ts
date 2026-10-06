@@ -64,7 +64,7 @@ export class AuthController {
   @Get('me')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get current user details' })
+  @ApiOperation({ summary: "Get current user's full profile" })
   me(@Req() req: any) {
     return this.authService.me(req.user);
   }

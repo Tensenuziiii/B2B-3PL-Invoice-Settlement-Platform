@@ -517,4 +517,89 @@ describe('AuthService', () => {
       }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
+
+  it('returns full profile with organization details and permissions on me()', async () => {
+    const fullProfile = {
+      id: 'user-123',
+      email: 'dispatch@vectologistics.in',
+      name: 'Dispatch Manager',
+      initials: 'DM',
+      role: Role.DISPATCH_MANAGER,
+      displayId: 'DIS-04',
+      hubName: 'Western Corridor Hub #4 (Bhiwandi)',
+      status: UserStatus.ACTIVE,
+      organizationId: 'org-test-1',
+      clientId: null,
+      createdAt: new Date('2026-10-01T00:00:00.000Z'),
+      organization: {
+        id: 'org-test-1',
+        name: 'Vecto Logistics',
+        legalName: 'Vecto Logistics Pvt Ltd',
+        gstin: '27AABCU9603R1ZM',
+        stateCode: '27',
+      },
+    };
+    findFirst.mockResolvedValue(fullProfile);
+
+    const tokenPayload = {
+      sub: 'user-123',
+      email: 'dispatch@vectologistics.in',
+      role: Role.DISPATCH_MANAGER,
+      displayId: 'DIS-04',
+      hubName: 'Western Corridor Hub #4 (Bhiwandi)',
+      orgId: 'org-test-1',
+      permissions: ['TRIP_VIEW', 'TRIP_CREATE'],
+    };
+
+    const result = await service.me(tokenPayload);
+
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { id: 'user-123' },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        initials: true,
+        role: true,
+        displayId: true,
+        hubName: true,
+        status: true,
+        organizationId: true,
+        clientId: true,
+        createdAt: true,
+        organization: {
+          select: { id: true, name: true, legalName: true, gstin: true, stateCode: true },
+        },
+      },
+    });
+
+    expect(result).toHaveProperty('id', 'user-123');
+    expect(result).toHaveProperty('email', 'dispatch@vectologistics.in');
+    expect(result).toHaveProperty('name', 'Dispatch Manager');
+    expect(result).toHaveProperty('role', Role.DISPATCH_MANAGER);
+    expect(result).toHaveProperty('displayId', 'DIS-04');
+    expect(result).toHaveProperty('hubName', 'Western Corridor Hub #4 (Bhiwandi)');
+    expect(result).toHaveProperty('status', UserStatus.ACTIVE);
+    expect(result).toHaveProperty('organizationId', 'org-test-1');
+    expect(result).toHaveProperty('clientId', null);
+    expect(result).toHaveProperty('createdAt', fullProfile.createdAt);
+    expect(result).toHaveProperty('organization', fullProfile.organization);
+    expect(result).toHaveProperty('permissions', ['TRIP_VIEW', 'TRIP_CREATE']);
+  });
+
+  it('throws UnauthorizedException if user no longer exists on me()', async () => {
+    findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.me({
+        sub: 'missing-user',
+        email: 'missing@example.com',
+        role: Role.DRIVER,
+        displayId: 'DRV-99',
+        hubName: null,
+        orgId: 'org-test-1',
+        permissions: [],
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
 });
