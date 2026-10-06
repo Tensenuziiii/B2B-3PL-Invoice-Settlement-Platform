@@ -68,7 +68,7 @@ export class UsersService {
 
   async create(dto: CreateUserDto) {
     const passwordHash = await argon2.hash(dto.password);
-    const data: Prisma.UserUncheckedCreateInput = {
+    const data = {
       email: dto.email.trim().toLowerCase(),
       name: dto.name.trim(),
       initials: dto.initials?.trim().toUpperCase() ?? this.makeInitials(dto.name),
@@ -77,7 +77,7 @@ export class UsersService {
       passwordHash,
       hubName: dto.hubName?.trim() || null,
       clientId: dto.clientId || null,
-    };
+    } as Prisma.UserUncheckedCreateInput;
 
     try {
       return await this.prisma.user.create({ data, select: publicUserSelect });
@@ -115,7 +115,7 @@ export class UsersService {
     }
 
     try {
-      return await this.prisma.$transaction(async (transaction) => {
+      return await this.prisma.$transaction(async (transaction: Prisma.TransactionClient) => {
         const user = await transaction.user.update({
           where: { id },
           data,

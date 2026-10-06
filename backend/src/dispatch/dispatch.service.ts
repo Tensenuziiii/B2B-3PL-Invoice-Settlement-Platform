@@ -3,9 +3,9 @@ import { Prisma, TripStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 const ACTIVE_TRIP_STATUSES = [
-  TripStatus.IN_TRANSIT,
-  TripStatus.DELAYED,
-  TripStatus.UNLOADING,
+  TripStatus.IN_PROGRESS,
+  TripStatus.IN_PROGRESS,
+  TripStatus.DELIVERY_IN_PROGRESS,
 ];
 
 @Injectable()
@@ -17,20 +17,15 @@ export class DispatchService {
       deletedAt: null,
       status: { in: ACTIVE_TRIP_STATUSES },
     };
-    const [active, delayed, totalFleet, pendingEod, cod, advances, hub] =
+    const [active, delayed, totalFleet, pendingEod, advances, hub] =
       await Promise.all([
         this.prisma.trip.count({ where: activeTripsWhere }),
         this.prisma.trip.count({
-          where: { deletedAt: null, status: TripStatus.DELAYED },
+          where: { deletedAt: null, status: TripStatus.IN_PROGRESS },
         }),
         this.prisma.vehicle.count({ where: { active: true, deletedAt: null } }),
         this.prisma.trip.count({
-          where: { deletedAt: null, status: TripStatus.EOD_PENDING },
-        }),
-        this.prisma.lorryReceipt.aggregate({
-          where: { deletedAt: null, trip: activeTripsWhere },
-          _sum: { codAmount: true },
-          _count: { _all: true },
+          where: { deletedAt: null, status: TripStatus.AUDIT_PENDING },
         }),
         this.prisma.driverAdvance.aggregate({
           where: { trip: activeTripsWhere },
@@ -63,8 +58,8 @@ export class DispatchService {
         {
           key: 'expectedCodInbound',
           label: 'Expected COD Inbound',
-          value: this.formatCurrency(cod._sum.codAmount ?? 0),
-          meta: `${cod._count._all} trips`,
+          value: this.formatCurrency(0),
+          meta: '0 trips',
           icon: 'banknote',
         },
         {
@@ -110,7 +105,7 @@ export class DispatchService {
     const normalizedSearch = search.trim();
     if (normalizedSearch) {
       where.OR = [
-        { tripCode: { contains: normalizedSearch, mode: 'insensitive' } },
+        { tripNumber: { contains: normalizedSearch, mode: 'insensitive' } },
         { origin: { contains: normalizedSearch, mode: 'insensitive' } },
         { destination: { contains: normalizedSearch, mode: 'insensitive' } },
         {
@@ -130,13 +125,13 @@ export class DispatchService {
       this.prisma.trip.findMany({
         where,
         include: { vehicle: true, driver: true },
-        orderBy: { tripCode: 'asc' },
+        orderBy: { tripNumber: 'asc' },
       }),
       this.prisma.trip.count({ where: { deletedAt: null } }),
     ]);
-    const filtered = trips.map((trip) => ({
+    const filtered = trips.map((trip: any) => ({
       regNo: trip.vehicle?.regNo ?? '',
-      tripCode: trip.tripCode,
+      tripNumber: trip.tripNumber,
       driver: {
         name: trip.driver?.name ?? 'Unassigned',
         phone: trip.driver?.phone ?? '',
@@ -159,14 +154,14 @@ export class DispatchService {
 
   async getEodReconciliation() {
     const trips = await this.prisma.trip.findMany({
-      where: { deletedAt: null, status: TripStatus.EOD_PENDING },
+      where: { deletedAt: null, status: TripStatus.AUDIT_PENDING },
       include: { vehicle: true },
       orderBy: { updatedAt: 'asc' },
     });
 
     return {
-      data: trips.map((trip) => ({
-        tripCode: trip.tripCode,
+      data: trips.map((trip: any) => ({
+        tripNumber: trip.tripNumber,
         regNo: trip.vehicle?.regNo ?? '',
         status: 'PENDING_EOD',
       })),
@@ -181,7 +176,7 @@ export class DispatchService {
     });
 
     return {
-      data: alerts.map((alert) => ({
+      data: alerts.map((alert: any) => ({
         id: alert.id,
         severity: alert.severity,
         title: alert.title,
@@ -200,7 +195,7 @@ export class DispatchService {
     });
 
     return {
-      data: notifications.map((notification) => ({
+      data: notifications.map((notification: any) => ({
         id: notification.id,
         title: notification.title,
         body: notification.body,

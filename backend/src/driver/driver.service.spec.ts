@@ -38,8 +38,8 @@ describe('DriverService', () => {
   it('returns assigned trip data and filters ownership in the query', async () => {
     tripFindMany.mockResolvedValue([
       {
-        tripCode: 'TRIP-1001',
-        status: 'IN_TRANSIT',
+        tripNumber: 'TRIP-1001',
+        status: 'IN_PROGRESS',
         origin: 'Bhiwandi Hub',
         destination: 'Whitefield RDC',
         eta: new Date('2026-10-03T18:30:00.000Z'),
@@ -47,23 +47,15 @@ describe('DriverService', () => {
         currentOdometer: 142890,
         vehicle: { regNo: 'MH 12 RN 4920' },
         client: { name: 'Metro Wholesale India', code: 'METRO-WHOLESALE' },
-        lorryReceipt: {
-          lrNo: 'LR-1001',
-          consignee: 'Metro Cash & Carry',
-          pallets: 12,
-          weightKg: 3800,
-          codAmount: 24500,
-          goodsDescription: 'Retail goods',
-        },
-        tripStops: [{ order: 1, name: 'Whitefield RDC', address: 'EPIP Zone' }],
+        tripStops: [{ sequence: 1, name: 'Whitefield RDC', address: 'EPIP Zone' }],
       },
     ]);
 
     await expect(service.getAssignedTrips('user-driver')).resolves.toEqual({
       data: [
         {
-          tripCode: 'TRIP-1001',
-          status: 'IN_TRANSIT',
+          tripNumber: 'TRIP-1001',
+          status: 'IN_PROGRESS',
           origin: 'Bhiwandi Hub',
           destination: 'Whitefield RDC',
           eta: new Date('2026-10-03T18:30:00.000Z'),
@@ -71,15 +63,7 @@ describe('DriverService', () => {
           currentOdometer: 142890,
           vehicleRegNo: 'MH 12 RN 4920',
           client: { name: 'Metro Wholesale India', code: 'METRO-WHOLESALE' },
-          lorryReceipt: {
-            lrNo: 'LR-1001',
-            consignee: 'Metro Cash & Carry',
-            pallets: 12,
-            weightKg: 3800,
-            codAmount: 24500,
-            goodsDescription: 'Retail goods',
-          },
-          stops: [{ order: 1, name: 'Whitefield RDC', address: 'EPIP Zone' }],
+          stops: [{ sequence: 1, name: 'Whitefield RDC', address: 'EPIP Zone' }],
         },
       ],
     });
@@ -91,19 +75,9 @@ describe('DriverService', () => {
       include: {
         vehicle: { select: { regNo: true } },
         client: { select: { name: true, code: true } },
-        lorryReceipt: {
-          select: {
-            lrNo: true,
-            consignee: true,
-            pallets: true,
-            weightKg: true,
-            codAmount: true,
-            goodsDescription: true,
-          },
-        },
         tripStops: {
-          orderBy: { order: 'asc' },
-          select: { order: true, name: true, address: true },
+          orderBy: { sequence: 'asc' },
+          select: { sequence: true, name: true, address: true },
         },
       },
       orderBy: { updatedAt: 'desc' },
@@ -122,8 +96,8 @@ describe('DriverService', () => {
   it('marks an owned in-transit trip arrived and audits the versioned transition', async () => {
     tripFindFirst.mockResolvedValue({
       id: 'trip-id',
-      tripCode: 'TRIP-1001',
-      status: TripStatus.IN_TRANSIT,
+      tripNumber: 'TRIP-1001',
+      status: TripStatus.IN_PROGRESS,
       version: 3,
     });
     tripUpdateMany.mockResolvedValue({ count: 1 });
@@ -131,25 +105,25 @@ describe('DriverService', () => {
     await expect(
       service.markArrived('user-driver', 'TRIP-1001', 3),
     ).resolves.toEqual({
-      tripCode: 'TRIP-1001',
-      status: TripStatus.ARRIVED,
+      tripNumber: 'TRIP-1001',
+      status: TripStatus.DELIVERY_IN_PROGRESS,
       version: 4,
     });
     expect(tripFindFirst).toHaveBeenCalledWith({
       where: {
-        tripCode: 'TRIP-1001',
+        tripNumber: 'TRIP-1001',
         deletedAt: null,
         driver: { is: { userId: 'user-driver', deletedAt: null } },
       },
-      select: { id: true, tripCode: true, status: true, version: true },
+      select: { id: true, tripNumber: true, status: true, version: true },
     });
     expect(tripUpdateMany).toHaveBeenCalledWith({
       where: {
         id: 'trip-id',
         version: 3,
-        status: TripStatus.IN_TRANSIT,
+        status: TripStatus.IN_PROGRESS,
       },
-      data: { status: TripStatus.ARRIVED, version: { increment: 1 } },
+      data: { status: TripStatus.DELIVERY_IN_PROGRESS, version: { increment: 1 } },
     });
     expect(auditLogCreate).toHaveBeenCalledWith({
       data: {
@@ -158,8 +132,8 @@ describe('DriverService', () => {
         action: 'TRIP_MARKED_ARRIVED',
         entity: 'Trip',
         entityId: 'trip-id',
-        beforeJson: { status: TripStatus.IN_TRANSIT, version: 3 },
-        afterJson: { status: TripStatus.ARRIVED, version: 4 },
+        beforeJson: { status: TripStatus.IN_PROGRESS, version: 3 },
+        afterJson: { status: TripStatus.DELIVERY_IN_PROGRESS, version: 4 },
       },
     });
     expect(transaction).toHaveBeenCalledTimes(1);
@@ -178,8 +152,8 @@ describe('DriverService', () => {
   it('rejects stale trip versions and invalid lifecycle states', async () => {
     tripFindFirst.mockResolvedValue({
       id: 'trip-id',
-      tripCode: 'TRIP-1001',
-      status: TripStatus.IN_TRANSIT,
+      tripNumber: 'TRIP-1001',
+      status: TripStatus.IN_PROGRESS,
       version: 4,
     });
 
@@ -190,8 +164,8 @@ describe('DriverService', () => {
 
     tripFindFirst.mockResolvedValue({
       id: 'trip-id',
-      tripCode: 'TRIP-1001',
-      status: TripStatus.ARRIVED,
+      tripNumber: 'TRIP-1001',
+      status: TripStatus.DELIVERY_IN_PROGRESS,
       version: 3,
     });
     await expect(
@@ -204,8 +178,8 @@ describe('DriverService', () => {
   it('rejects a concurrent update instead of writing a stale audit record', async () => {
     tripFindFirst.mockResolvedValue({
       id: 'trip-id',
-      tripCode: 'TRIP-1001',
-      status: TripStatus.DELAYED,
+      tripNumber: 'TRIP-1001',
+      status: TripStatus.IN_PROGRESS,
       version: 3,
     });
     tripUpdateMany.mockResolvedValue({ count: 0 });

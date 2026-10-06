@@ -8,7 +8,6 @@ describe('DispatchService', () => {
   let tripFindMany: jest.Mock;
   let tripCount: jest.Mock;
   let vehicleCount: jest.Mock;
-  let lorryReceiptAggregate: jest.Mock;
   let driverAdvanceAggregate: jest.Mock;
   let hubFindFirst: jest.Mock;
   let systemAlertFindMany: jest.Mock;
@@ -18,7 +17,6 @@ describe('DispatchService', () => {
     tripFindMany = jest.fn();
     tripCount = jest.fn();
     vehicleCount = jest.fn();
-    lorryReceiptAggregate = jest.fn();
     driverAdvanceAggregate = jest.fn();
     hubFindFirst = jest.fn();
     systemAlertFindMany = jest.fn();
@@ -27,7 +25,6 @@ describe('DispatchService', () => {
       {
         trip: { findMany: tripFindMany, count: tripCount },
         vehicle: { count: vehicleCount },
-        lorryReceipt: { aggregate: lorryReceiptAggregate },
         driverAdvance: { aggregate: driverAdvanceAggregate },
         hub: { findFirst: hubFindFirst },
         systemAlert: { findMany: systemAlertFindMany },
@@ -112,10 +109,6 @@ describe('DispatchService', () => {
       .mockResolvedValueOnce(1)
       .mockResolvedValueOnce(2);
     vehicleCount.mockResolvedValue(8);
-    lorryReceiptAggregate.mockResolvedValue({
-      _sum: { codAmount: 30000 },
-      _count: { _all: 3 },
-    });
     driverAdvanceAggregate.mockResolvedValue({ _sum: { amount: 4000 } });
     hubFindFirst.mockResolvedValue({ name: 'Western Corridor Hub' });
 
@@ -133,8 +126,8 @@ describe('DispatchService', () => {
       {
         key: 'expectedCodInbound',
         label: 'Expected COD Inbound',
-        value: '₹30,000',
-        meta: '3 trips',
+        value: '₹0',
+        meta: '0 trips',
         icon: 'banknote',
       },
       {
@@ -163,32 +156,11 @@ describe('DispatchService', () => {
     });
     expect(result.hub.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(result.sidebarBadges).toEqual({ eodReconciliation: 2 });
-    expect(lorryReceiptAggregate).toHaveBeenCalledWith({
-      where: {
-        deletedAt: null,
-        trip: {
-          deletedAt: null,
-          status: {
-            in: [
-              TripStatus.IN_TRANSIT,
-              TripStatus.DELAYED,
-              TripStatus.UNLOADING,
-            ],
-          },
-        },
-      },
-      _sum: { codAmount: true },
-      _count: { _all: true },
-    });
   });
 
   it('returns safe zero values when the database has no dispatch data', async () => {
     tripCount.mockResolvedValue(0);
     vehicleCount.mockResolvedValue(0);
-    lorryReceiptAggregate.mockResolvedValue({
-      _sum: { codAmount: null },
-      _count: { _all: 0 },
-    });
     driverAdvanceAggregate.mockResolvedValue({ _sum: { amount: null } });
     hubFindFirst.mockResolvedValue(null);
 
@@ -207,8 +179,8 @@ describe('DispatchService', () => {
   it('queries and maps database fleet rows without changing the response shape', async () => {
     tripFindMany.mockResolvedValue([
       {
-        tripCode: 'TRIP-1001',
-        status: TripStatus.IN_TRANSIT,
+        tripNumber: 'TRIP-1001',
+        status: TripStatus.IN_PROGRESS,
         origin: 'Bhiwandi Hub, MH',
         destination: 'Sanand Industrial Park, GJ',
         startOdometer: 142380,
@@ -222,14 +194,14 @@ describe('DispatchService', () => {
     ]);
     tripCount.mockResolvedValue(8);
 
-    const result = await service.getFleet('IN_TRANSIT', 'Rajesh');
+    const result = await service.getFleet('IN_PROGRESS', 'Rajesh');
 
     expect(tripFindMany).toHaveBeenCalledWith({
       where: {
         deletedAt: null,
-        status: TripStatus.IN_TRANSIT,
+        status: TripStatus.IN_PROGRESS,
         OR: expect.arrayContaining([
-          { tripCode: { contains: 'Rajesh', mode: 'insensitive' } },
+          { tripNumber: { contains: 'Rajesh', mode: 'insensitive' } },
           {
             driver: {
               is: { name: { contains: 'Rajesh', mode: 'insensitive' } },
@@ -238,19 +210,19 @@ describe('DispatchService', () => {
         ]),
       },
       include: { vehicle: true, driver: true },
-      orderBy: { tripCode: 'asc' },
+      orderBy: { tripNumber: 'asc' },
     });
     expect(result).toEqual({
       data: [
         {
           regNo: 'MH 12 RN 4920',
-          tripCode: 'TRIP-1001',
+          tripNumber: 'TRIP-1001',
           driver: { name: 'Rajesh Kumar', phone: '+91 98231 44021' },
           destination: 'Sanand Industrial Park, GJ',
           originNote: 'From Bhiwandi Hub, MH • ETA 2026-10-03T18:30:00.000Z',
           startOdometer: 142380,
           currentOdometer: 142890,
-          status: TripStatus.IN_TRANSIT,
+          status: TripStatus.IN_PROGRESS,
         },
       ],
       meta: { showing: 1, total: 8 },
@@ -267,7 +239,7 @@ describe('DispatchService', () => {
   it('returns only trips awaiting EOD reconciliation', async () => {
     tripFindMany.mockResolvedValue([
       {
-        tripCode: 'TRIP-2001',
+        tripNumber: 'TRIP-2001',
         vehicle: { regNo: 'KA 01 AJ 3319' },
       },
     ]);
@@ -275,14 +247,14 @@ describe('DispatchService', () => {
     await expect(service.getEodReconciliation()).resolves.toEqual({
       data: [
         {
-          tripCode: 'TRIP-2001',
+          tripNumber: 'TRIP-2001',
           regNo: 'KA 01 AJ 3319',
           status: 'PENDING_EOD',
         },
       ],
     });
     expect(tripFindMany).toHaveBeenCalledWith({
-      where: { deletedAt: null, status: TripStatus.EOD_PENDING },
+      where: { deletedAt: null, status: TripStatus.AUDIT_PENDING },
       include: { vehicle: true },
       orderBy: { updatedAt: 'asc' },
     });

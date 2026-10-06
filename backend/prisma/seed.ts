@@ -64,12 +64,7 @@ async function main() {
 
   for (const u of users) {
     await prisma.user.upsert({
-      where: {
-        organizationId_email: {
-          organizationId: org.id,
-          email: u.email,
-        },
-      },
+      where: { email: u.email },
       update: {},
       create: {
         organizationId: org.id,

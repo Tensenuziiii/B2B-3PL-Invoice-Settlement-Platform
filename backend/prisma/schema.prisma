@@ -133,7 +133,7 @@ model User {
   id                  String     @id @default(uuid()) @db.Uuid
   organizationId      String     @db.Uuid
   organization        Organization @relation(fields: [organizationId], references: [id])
-  email               String
+  email               String     @unique
   passwordHash        String?
   name                String
   initials            String     @default("VL")
@@ -153,7 +153,6 @@ model User {
   passwordResetTokens PasswordResetToken[]
   loginAttempts      LoginAttempt[]
 
-  @@unique([organizationId, email])
   @@index([organizationId])
   @@index([role, status])
 }

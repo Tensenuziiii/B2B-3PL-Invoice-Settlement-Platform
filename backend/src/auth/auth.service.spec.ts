@@ -2,13 +2,13 @@ import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Role, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaRootService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
   const password = 'Enterprise@2026';
   let service: AuthService;
-  let findUnique: jest.Mock;
+  let findFirst: jest.Mock;
   let sign: jest.Mock;
   let userUpdate: jest.Mock;
   let refreshTokenFindUnique: jest.Mock;
@@ -21,7 +21,7 @@ describe('AuthService', () => {
   let loginAttemptCreate: jest.Mock;
 
   beforeEach(() => {
-    findUnique = jest.fn();
+    findFirst = jest.fn();
     userUpdate = jest.fn().mockResolvedValue({ failedLoginAttempts: 1 });
     sign = jest.fn().mockReturnValue('signed-access-token');
     refreshTokenFindUnique = jest.fn();
@@ -47,13 +47,13 @@ describe('AuthService', () => {
     service = new AuthService(
       { sign } as unknown as JwtService,
       {
-        user: { findUnique, update: userUpdate },
+        user: { findFirst, update: userUpdate },
         refreshToken,
         passwordResetToken,
         loginAttempt,
         $transaction: (run: (transaction: unknown) => unknown) =>
           run({ refreshToken, passwordResetToken, loginAttempt, user: { update: userUpdate } }),
-      } as unknown as PrismaService,
+      } as unknown as PrismaRootService,
     );
   });
 
@@ -72,14 +72,14 @@ describe('AuthService', () => {
       hubName: 'Western Corridor Hub #4 (Bhiwandi)',
       deletedAt: null,
     };
-    findUnique.mockResolvedValue(user);
+    findFirst.mockResolvedValue(user);
 
     const result = await service.login({
       email: ' DISPATCH@VECTOLOGISTICS.IN ',
       password,
     });
 
-    expect(findUnique).toHaveBeenCalledWith({
+    expect(findFirst).toHaveBeenCalledWith({
       where: { email: 'dispatch@vectologistics.in' },
     });
     expect(sign).toHaveBeenCalledWith({
@@ -120,7 +120,7 @@ describe('AuthService', () => {
   });
 
   it('rejects unknown users with a generic authentication error', async () => {
-    findUnique.mockResolvedValue(null);
+    findFirst.mockResolvedValue(null);
 
     await expect(
       service.login({ email: 'unknown@example.com', password }),
@@ -136,7 +136,7 @@ describe('AuthService', () => {
   });
 
   it('rejects an incorrect password with the same generic authentication error', async () => {
-    findUnique.mockResolvedValue({
+    findFirst.mockResolvedValue({
       id: 'user-123',
       email: 'dispatch@vectologistics.in',
       passwordHash: await argon2.hash(password),
@@ -160,7 +160,7 @@ describe('AuthService', () => {
   });
 
   it('sets a timed lock after the fifth failed password attempt', async () => {
-    findUnique.mockResolvedValue({
+    findFirst.mockResolvedValue({
       id: 'user-123',
       email: 'dispatch@vectologistics.in',
       passwordHash: await argon2.hash(password),
@@ -184,7 +184,7 @@ describe('AuthService', () => {
   });
 
   it('rejects accounts during an active lock without checking a password', async () => {
-    findUnique.mockResolvedValue({
+    findFirst.mockResolvedValue({
       id: 'user-123',
       email: 'dispatch@vectologistics.in',
       passwordHash: await argon2.hash(password),
@@ -273,7 +273,7 @@ describe('AuthService', () => {
   });
 
   it('keeps password reset responses generic for unknown email addresses', async () => {
-    findUnique.mockResolvedValue(null);
+    findFirst.mockResolvedValue(null);
 
     await expect(
       service.requestPasswordReset('missing@example.com'),
@@ -285,7 +285,7 @@ describe('AuthService', () => {
   });
 
   it('stores only a hash for a known account password reset token', async () => {
-    findUnique.mockResolvedValue({
+    findFirst.mockResolvedValue({
       id: 'user-123',
       status: UserStatus.ACTIVE,
       deletedAt: null,

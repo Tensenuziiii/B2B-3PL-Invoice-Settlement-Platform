@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Role, TripStatus } from '@prisma/client';
+import { Prisma, Role, TripStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -19,19 +19,9 @@ export class DriverService {
       include: {
         vehicle: { select: { regNo: true } },
         client: { select: { name: true, code: true } },
-        lorryReceipt: {
-          select: {
-            lrNo: true,
-            consignee: true,
-            pallets: true,
-            weightKg: true,
-            codAmount: true,
-            goodsDescription: true,
-          },
-        },
         tripStops: {
-          orderBy: { order: 'asc' },
-          select: { order: true, name: true, address: true },
+          orderBy: { sequence: 'asc' },
+          select: { sequence: true, name: true, address: true },
         },
       },
       orderBy: { updatedAt: 'desc' },
@@ -39,8 +29,8 @@ export class DriverService {
     });
 
     return {
-      data: trips.map((trip) => ({
-        tripCode: trip.tripCode,
+      data: trips.map((trip: any) => ({
+        tripNumber: trip.tripNumber,
         status: trip.status,
         origin: trip.origin ?? '',
         destination: trip.destination ?? '',
@@ -51,21 +41,20 @@ export class DriverService {
         client: trip.client
           ? { name: trip.client.name, code: trip.client.code }
           : null,
-        lorryReceipt: trip.lorryReceipt,
         stops: trip.tripStops,
       })),
     };
   }
 
-  async markArrived(userId: string, tripCode: string, expectedVersion: number) {
-    return this.prisma.$transaction(async (transaction) => {
+  async markArrived(userId: string, tripNumber: string, expectedVersion: number) {
+    return this.prisma.$transaction(async (transaction: Prisma.TransactionClient) => {
       const trip = await transaction.trip.findFirst({
         where: {
-          tripCode,
+          tripNumber,
           deletedAt: null,
           driver: { is: { userId, deletedAt: null } },
         },
-        select: { id: true, tripCode: true, status: true, version: true },
+        select: { id: true, tripNumber: true, status: true, version: true },
       });
 
       if (!trip) {
@@ -76,10 +65,7 @@ export class DriverService {
         throw new ConflictException('Trip was updated. Refresh and try again.');
       }
 
-      if (
-        trip.status !== TripStatus.IN_TRANSIT &&
-        trip.status !== TripStatus.DELAYED
-      ) {
+      if (trip.status !== TripStatus.IN_PROGRESS) {
         throw new ConflictException('Trip cannot be marked arrived from its current status.');
       }
 
@@ -90,7 +76,7 @@ export class DriverService {
           status: trip.status,
         },
         data: {
-          status: TripStatus.ARRIVED,
+          status: TripStatus.DELIVERY_IN_PROGRESS,
           version: { increment: 1 },
         },
       });
@@ -108,15 +94,15 @@ export class DriverService {
           entityId: trip.id,
           beforeJson: { status: trip.status, version: trip.version },
           afterJson: {
-            status: TripStatus.ARRIVED,
+            status: TripStatus.DELIVERY_IN_PROGRESS,
             version: trip.version + 1,
           },
-        },
+        } as unknown as Prisma.AuditLogUncheckedCreateInput,
       });
 
       return {
-        tripCode: trip.tripCode,
-        status: TripStatus.ARRIVED,
+        tripNumber: trip.tripNumber,
+        status: TripStatus.DELIVERY_IN_PROGRESS,
         version: trip.version + 1,
       };
     });

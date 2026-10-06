@@ -9,6 +9,9 @@ import { DriverModule } from './driver/driver.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { TenantInterceptor } from './core/tenant/tenant.interceptor';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -32,6 +35,9 @@ import { UsersModule } from './users/users.module';
     UsersModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
+  ],
 })
 export class AppModule {}

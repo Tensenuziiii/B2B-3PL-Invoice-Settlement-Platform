@@ -3,7 +3,7 @@ import { Role, UserStatus } from '@prisma/client';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaRootService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -17,6 +17,7 @@ type TokenPayload = {
   role: Role;
   displayId: string;
   hubName: string | null;
+  orgId?: string;
 };
 
 export type LoginRequestMetadata = {
@@ -67,12 +68,12 @@ const LOGIN_PRESETS = [
 export class AuthService {
   constructor(
     private readonly jwtService: JwtService,
-    private readonly prisma: PrismaService,
+    private readonly prisma: PrismaRootService,
   ) {}
 
   async login(dto: LoginDto, metadata: LoginRequestMetadata = {}) {
     const email = dto.email.trim().toLowerCase();
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prisma.user.findFirst({
       where: { email },
     });
 
@@ -140,9 +141,10 @@ export class AuthService {
       role: user.role,
       displayId: user.displayId,
       hubName: user.hubName,
+      orgId: user.organizationId,
     };
 
-    const session = await this.createSession(payload, user.id, metadata);
+    const session = await this.createSession(payload, user, metadata);
 
     const resultUser = {
       id: payload.sub,
@@ -217,6 +219,7 @@ export class AuthService {
         data: {
           tokenHash: nextTokenHash,
           userId: storedToken.userId,
+          organizationId: storedToken.user.organizationId,
           familyId,
           expiresAt: new Date(now.getTime() + REFRESH_TOKEN_TTL_MS),
         },
@@ -232,6 +235,7 @@ export class AuthService {
         role: storedToken.user.role,
         displayId: storedToken.user.displayId,
         hubName: storedToken.user.hubName,
+        orgId: storedToken.user.organizationId,
       };
 
       return {
@@ -257,7 +261,7 @@ export class AuthService {
   }
 
   async requestPasswordReset(email: string) {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prisma.user.findFirst({
       where: { email: email.trim().toLowerCase() },
     });
     const response = {
@@ -365,7 +369,7 @@ export class AuthService {
 
   private async createSession(
     payload: TokenPayload,
-    userId: string,
+    user: { id: string; organizationId: string },
     metadata: LoginRequestMetadata,
   ) {
     const refreshToken = randomBytes(48).toString('base64url');
@@ -373,7 +377,8 @@ export class AuthService {
       await transaction.refreshToken.create({
         data: {
           tokenHash: this.hashToken(refreshToken),
-          userId,
+          userId: user.id,
+          organizationId: user.organizationId,
           familyId: randomUUID(),
           expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
         },
@@ -381,7 +386,8 @@ export class AuthService {
       await transaction.loginAttempt.create({
         data: {
           email: payload.email,
-          userId,
+          userId: user.id,
+          organizationId: user.organizationId,
           succeeded: true,
           ipAddress: metadata.ipAddress,
           userAgent: metadata.userAgent?.slice(0, 512),
