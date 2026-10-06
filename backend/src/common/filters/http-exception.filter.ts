@@ -5,8 +5,19 @@ import {
   HttpException,
   HttpStatus,
   Logger,
-} from '@nestjs/common';
-import { Request, Response } from 'express';
+} from "@nestjs/common";
+import type { Request, Response } from "express";
+
+const CODE_BY_STATUS: Record<number, string> = {
+  400: "BAD_REQUEST",
+  401: "UNAUTHORIZED",
+  403: "FORBIDDEN",
+  404: "NOT_FOUND",
+  409: "CONFLICT",
+  422: "VALIDATION_FAILED",
+  429: "RATE_LIMITED",
+  500: "INTERNAL_ERROR",
+};
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -17,36 +28,24 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const req = ctx.getRequest<Request>();
     const res = ctx.getResponse<Response>();
 
-    const requestId = req.headers['x-request-id'] ?? 'n/a';
+    let status = HttpStatus.INTERNAL_SERVER_ERROR;
+    let code = "INTERNAL_ERROR";
+    let message = "Unexpected error";
 
-    const status =
-      exception instanceof HttpException
-        ? exception.getStatus()
-        : HttpStatus.INTERNAL_SERVER_ERROR;
+    if (exception instanceof HttpException) {
+      status = exception.getStatus();
+      code = CODE_BY_STATUS[status] ?? "ERROR";
+      const body = exception.getResponse() as any;
+      message =
+        typeof body === "string"
+          ? body
+          : Array.isArray(body?.message)
+            ? body.message.join("; ")
+            : (body?.message ?? exception.message);
+    } else if (exception instanceof Error) {
+      this.logger.error(`${req.method} ${req.url} — ${exception.message}`, exception.stack);
+    }
 
-    const response =
-      exception instanceof HttpException
-        ? exception.getResponse()
-        : { message: 'Internal server error' };
-
-    const payload = {
-      code: status,
-      message:
-        typeof response === 'object' && response !== null && 'message' in response
-          ? (response.message as string)
-          : 'Unexpected error',
-      details:
-        typeof response === 'object' && response !== null && 'details' in response
-          ? response.details
-          : undefined,
-      requestId,
-    };
-
-    this.logger.error(
-      `${req.method} ${req.url} failed`,
-      exception instanceof Error ? exception.stack : undefined,
-    );
-
-    res.status(status).json(payload);
+    res.status(status).json({ error: { code, message } });
   }
 }

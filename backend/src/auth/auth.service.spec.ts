@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Role, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
@@ -11,6 +11,8 @@ describe('AuthService', () => {
   let findFirst: jest.Mock;
   let sign: jest.Mock;
   let userUpdate: jest.Mock;
+  let userCreate: jest.Mock;
+  let userFindFirst: jest.Mock;
   let refreshTokenFindUnique: jest.Mock;
   let refreshTokenCreate: jest.Mock;
   let refreshTokenUpdateMany: jest.Mock;
@@ -19,10 +21,15 @@ describe('AuthService', () => {
   let passwordResetTokenCreate: jest.Mock;
   let passwordResetTokenUpdateMany: jest.Mock;
   let loginAttemptCreate: jest.Mock;
+  let invitationCreate: jest.Mock;
+  let invitationFindFirst: jest.Mock;
+  let invitationUpdate: jest.Mock;
 
   beforeEach(() => {
     findFirst = jest.fn();
     userUpdate = jest.fn().mockResolvedValue({ failedLoginAttempts: 1 });
+    userCreate = jest.fn();
+    userFindFirst = jest.fn().mockResolvedValue(null);
     sign = jest.fn().mockReturnValue('signed-access-token');
     refreshTokenFindUnique = jest.fn();
     refreshTokenCreate = jest.fn().mockResolvedValue({ id: 'refresh-new' });
@@ -32,6 +39,9 @@ describe('AuthService', () => {
     passwordResetTokenCreate = jest.fn();
     passwordResetTokenUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
     loginAttemptCreate = jest.fn().mockResolvedValue({ id: 'login-attempt-1' });
+    invitationCreate = jest.fn();
+    invitationFindFirst = jest.fn();
+    invitationUpdate = jest.fn();
     const refreshToken = {
       findUnique: refreshTokenFindUnique,
       create: refreshTokenCreate,
@@ -44,6 +54,11 @@ describe('AuthService', () => {
       updateMany: passwordResetTokenUpdateMany,
     };
     const loginAttempt = { create: loginAttemptCreate };
+    const invitation = {
+      create: invitationCreate,
+      findFirst: invitationFindFirst,
+      update: invitationUpdate,
+    };
     service = new AuthService(
       { sign } as unknown as JwtService,
       {
@@ -51,8 +66,15 @@ describe('AuthService', () => {
         refreshToken,
         passwordResetToken,
         loginAttempt,
+        invitation,
         $transaction: (run: (transaction: unknown) => unknown) =>
-          run({ refreshToken, passwordResetToken, loginAttempt, user: { update: userUpdate } }),
+          run({
+            refreshToken,
+            passwordResetToken,
+            loginAttempt,
+            user: { update: userUpdate, findFirst: userFindFirst, create: userCreate },
+            invitation: { update: invitationUpdate },
+          }),
       } as unknown as PrismaRootService,
     );
   });
@@ -60,6 +82,7 @@ describe('AuthService', () => {
   it('authenticates an active database user and returns the existing login contract', async () => {
     const user = {
       id: 'user-123',
+      organizationId: 'org-test-1',
       email: 'dispatch@vectologistics.in',
       passwordHash: await argon2.hash(password),
       name: 'Dispatch Manager',
@@ -88,6 +111,7 @@ describe('AuthService', () => {
       role: user.role,
       displayId: user.displayId,
       hubName: user.hubName,
+      orgId: 'org-test-1',
     });
     expect(result).toEqual({
       accessToken: 'signed-access-token',
@@ -138,6 +162,7 @@ describe('AuthService', () => {
   it('rejects an incorrect password with the same generic authentication error', async () => {
     findFirst.mockResolvedValue({
       id: 'user-123',
+      organizationId: 'org-test-1',
       email: 'dispatch@vectologistics.in',
       passwordHash: await argon2.hash(password),
       status: UserStatus.ACTIVE,
@@ -162,6 +187,7 @@ describe('AuthService', () => {
   it('sets a timed lock after the fifth failed password attempt', async () => {
     findFirst.mockResolvedValue({
       id: 'user-123',
+      organizationId: 'org-test-1',
       email: 'dispatch@vectologistics.in',
       passwordHash: await argon2.hash(password),
       status: UserStatus.ACTIVE,
@@ -186,6 +212,7 @@ describe('AuthService', () => {
   it('rejects accounts during an active lock without checking a password', async () => {
     findFirst.mockResolvedValue({
       id: 'user-123',
+      organizationId: 'org-test-1',
       email: 'dispatch@vectologistics.in',
       passwordHash: await argon2.hash(password),
       status: UserStatus.ACTIVE,
@@ -210,6 +237,7 @@ describe('AuthService', () => {
       expiresAt: new Date(Date.now() + 60_000),
       user: {
         id: 'user-123',
+        organizationId: 'org-test-1',
         email: 'dispatch@vectologistics.in',
         role: Role.DISPATCH_MANAGER,
         displayId: 'DIS-04',
@@ -368,5 +396,114 @@ describe('AuthService', () => {
       service.resetPassword('expired-reset-token', 'NewPassword@2026'),
     ).rejects.toBeInstanceOf(UnauthorizedException);
     expect(userUpdate).not.toHaveBeenCalled();
+  });
+
+  it('inviteUser creates an invitation row with hashed token', async () => {
+    const result = await service.inviteUser({
+      email: 'new@example.com',
+      role: Role.DRIVER,
+      invitedById: 'admin-1',
+      organizationId: 'org-1',
+    });
+
+    expect(invitationCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        organizationId: 'org-1',
+        email: 'new@example.com',
+        role: 'DRIVER',
+        tokenHash: expect.any(String),
+        expiresAt: expect.any(Date),
+      }),
+    });
+    expect(result).toMatchObject({ success: true });
+    if (process.env.NODE_ENV === 'development') {
+      expect(typeof (result as any).token).toBe('string');
+    } else {
+      expect((result as any).token).toBeUndefined();
+    }
+  });
+
+  it('inviteUser normalizes email to lowercase', async () => {
+    await service.inviteUser({
+      email: 'NEW@EXAMPLE.COM',
+      role: Role.DRIVER,
+      invitedById: 'admin-1',
+      organizationId: 'org-1',
+    });
+
+    expect(invitationCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        email: 'new@example.com',
+      }),
+    });
+  });
+
+  it('acceptInvite rejects missing or invalid token', async () => {
+    invitationFindFirst.mockResolvedValue(null);
+
+    await expect(
+      service.acceptInvite({ token: 'bogus', password: 'ValidPass123!' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('acceptInvite rejects expired invitation', async () => {
+    invitationFindFirst.mockResolvedValue(null);
+
+    await expect(
+      service.acceptInvite({ token: 'expired-token', password: 'ValidPass123!' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('acceptInvite creates user and marks invitation used', async () => {
+    invitationFindFirst.mockResolvedValue({
+      id: 'inv-1',
+      email: 'new@example.com',
+      organizationId: 'org-1',
+      role: 'DRIVER',
+      acceptedAt: null,
+    });
+    userFindFirst.mockResolvedValue(null);
+
+    const result = await service.acceptInvite({
+      token: 'valid-token',
+      password: 'ValidPass123!',
+    });
+
+    expect(userCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        organizationId: 'org-1',
+        email: 'new@example.com',
+        role: 'DRIVER',
+        passwordHash: expect.any(String),
+      }),
+    });
+    const createdUserData = userCreate.mock.calls[0][0].data;
+    await expect(
+      argon2.verify(createdUserData.passwordHash, 'ValidPass123!'),
+    ).resolves.toBe(true);
+
+    expect(invitationUpdate).toHaveBeenCalledWith({
+      where: { id: 'inv-1' },
+      data: { acceptedAt: expect.any(Date) },
+    });
+    expect(result).toEqual({ success: true });
+  });
+
+  it('acceptInvite rejects if user with email already exists', async () => {
+    invitationFindFirst.mockResolvedValue({
+      id: 'inv-1',
+      email: 'new@example.com',
+      organizationId: 'org-1',
+      role: 'DRIVER',
+      acceptedAt: null,
+    });
+    userFindFirst.mockResolvedValue({ id: 'existing-user' });
+
+    await expect(
+      service.acceptInvite({
+        token: 'valid-token',
+        password: 'ValidPass123!',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 });

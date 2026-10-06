@@ -11,9 +11,14 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Role } from '@prisma/client';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { InviteUserDto } from './dto/invite-user.dto';
+import { AcceptInviteDto } from './dto/accept-invite.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -104,13 +109,31 @@ export class AuthController {
     return this.authService.getPresets();
   }
 
+  @Post('invite')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth()
+  invite(@Body() dto: InviteUserDto, @Req() req: any) {
+    return this.authService.inviteUser({
+      email: dto.email,
+      role: dto.role,
+      invitedById: req.user.sub,
+      organizationId: req.user.orgId,
+    });
+  }
+
+  @Post('accept-invite')
+  acceptInvite(@Body() dto: AcceptInviteDto) {
+    return this.authService.acceptInvite({ token: dto.token, password: dto.password });
+  }
+
   private setRefreshCookie(res: Response, refreshToken: string) {
     res.cookie('refresh_token', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
       path: '/auth',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
   }
 }

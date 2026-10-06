@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Role, UserStatus } from '@prisma/client';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
@@ -6,7 +10,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { PrismaRootService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 
-const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000;
 const LOGIN_FAILURE_LIMIT = 5;
 const LOGIN_LOCK_DURATION_MS = 15 * 60 * 1000;
@@ -17,7 +21,7 @@ type TokenPayload = {
   role: Role;
   displayId: string;
   hubName: string | null;
-  orgId?: string;
+  orgId: string;
 };
 
 export type LoginRequestMetadata = {
@@ -365,6 +369,76 @@ export class AuthService {
       email: user.email,
       redirectPath: user.redirectPath,
     }));
+  }
+
+  async inviteUser(input: {
+    email: string;
+    role: Role;
+    invitedById: string;
+    organizationId: string;
+  }) {
+    const email = input.email.trim().toLowerCase();
+    const token = randomBytes(32).toString('base64url');
+    const tokenHash = this.hashToken(token);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    await this.prisma.invitation.create({
+      data: {
+        organizationId: input.organizationId,
+        email,
+        role: input.role,
+        tokenHash,
+        expiresAt,
+        invitedById: input.invitedById,
+      },
+    });
+
+    // Email sending is out of scope for this step — log the token in dev only
+    if (process.env.NODE_ENV === 'development') {
+      return { success: true, token }; // returned so admin can share the invite link
+    }
+    return { success: true };
+  }
+
+  async acceptInvite(input: { token: string; password: string }) {
+    const tokenHash = this.hashToken(input.token);
+    const invitation = await this.prisma.invitation.findFirst({
+      where: { tokenHash, acceptedAt: null, expiresAt: { gt: new Date() } },
+    });
+
+    if (!invitation) {
+      throw new UnauthorizedException('Invalid or expired invitation.');
+    }
+
+    const passwordHash = await argon2.hash(input.password);
+
+    await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.user.findFirst({
+        where: { email: invitation.email },
+      });
+      if (existing) {
+        throw new ConflictException('User with this email already exists.');
+      }
+
+      await tx.user.create({
+        data: {
+          organizationId: invitation.organizationId,
+          email: invitation.email,
+          name: invitation.email.split('@')[0],
+          initials: invitation.email.slice(0, 2).toUpperCase(),
+          passwordHash,
+          role: invitation.role,
+          displayId: `USR-${Date.now()}`,
+        },
+      });
+
+      await tx.invitation.update({
+        where: { id: invitation.id },
+        data: { acceptedAt: new Date() },
+      });
+    });
+
+    return { success: true };
   }
 
   private async createSession(
