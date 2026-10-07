@@ -111,6 +111,7 @@ model Organization {
   vehicles          Vehicle[]
   drivers           Driver[]
   clients           Client[]
+  vendors           Vendor[]
   trips             Trip[]
   tripStops         TripStop[]
   pods              Pod[]
@@ -523,6 +524,25 @@ model Notification {
 
   @@index([organizationId])
   @@index([userId, readAt])
+}
+
+model Vendor {
+  id               String    @id @default(uuid()) @db.Uuid
+  organizationId   String    @db.Uuid
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  name             String
+  code             String
+  gstin            String?
+  stateCode        String?
+  payoutTermsDays  Int       @default(15)
+  status           String    @default("ACTIVE")
+  createdAt        DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt        DateTime? @db.Timestamptz(6)
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([organizationId, status])
 }
 
 model AuditLog {
