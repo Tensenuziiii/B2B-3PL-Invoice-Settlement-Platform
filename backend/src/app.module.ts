@@ -8,6 +8,7 @@ import { DispatchModule } from './dispatch/dispatch.module';
 import { DriverModule } from './driver/driver.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
+import { VehiclesModule } from './vehicles/vehicles.module';
 
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { TenantInterceptor } from './core/tenant/tenant.interceptor';
@@ -33,6 +34,7 @@ import { TenantInterceptor } from './core/tenant/tenant.interceptor';
     DispatchModule,
     DriverModule,
     UsersModule,
+    VehiclesModule,
   ],
   controllers: [AppController],
   providers: [
