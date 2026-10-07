@@ -5,7 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { DispatchModule } from './dispatch/dispatch.module';
-import { DriverModule } from './driver/driver.module';
+import { DriversModule } from './drivers/drivers.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
@@ -32,7 +32,7 @@ import { TenantInterceptor } from './core/tenant/tenant.interceptor';
     PrismaModule,
     AuthModule,
     DispatchModule,
-    DriverModule,
+    DriversModule,
     UsersModule,
     VehiclesModule,
   ],
