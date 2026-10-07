@@ -251,6 +251,7 @@ model Client {
   gstin            String?
   stateCode        String?
   paymentTermsDays Int      @default(30)
+  status           String   @default("ACTIVE")
   createdAt        DateTime @default(now()) @db.Timestamptz(6)
   updatedAt        DateTime @updatedAt @db.Timestamptz(6)
   deletedAt        DateTime? @db.Timestamptz(6)
@@ -261,6 +262,7 @@ model Client {
 
   @@unique([organizationId, code])
   @@index([organizationId])
+  @@index([organizationId, status])
 }
 
 model Vehicle {

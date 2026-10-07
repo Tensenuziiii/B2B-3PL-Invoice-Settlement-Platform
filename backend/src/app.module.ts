@@ -4,6 +4,7 @@ import * as Joi from 'joi';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
+import { ClientsModule } from './clients/clients.module';
 import { DispatchModule } from './dispatch/dispatch.module';
 import { DriversModule } from './drivers/drivers.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -31,6 +32,7 @@ import { TenantInterceptor } from './core/tenant/tenant.interceptor';
     }),
     PrismaModule,
     AuthModule,
+    ClientsModule,
     DispatchModule,
     DriversModule,
     UsersModule,
