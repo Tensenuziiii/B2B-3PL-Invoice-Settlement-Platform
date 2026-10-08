@@ -12,6 +12,7 @@ import { UsersModule } from './users/users.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { VendorsModule } from './vendors/vendors.module';
 import { RoutesModule } from './routes/routes.module';
+import { RateCardsModule } from './rate-cards/rate-cards.module';
 
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { TenantInterceptor } from './core/tenant/tenant.interceptor';
@@ -41,6 +42,7 @@ import { TenantInterceptor } from './core/tenant/tenant.interceptor';
     VehiclesModule,
     VendorsModule,
     RoutesModule,
+    RateCardsModule,
   ],
   controllers: [AppController],
   providers: [
