@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { Role } from "@prisma/client";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -8,6 +8,7 @@ import { CreateRateCardDto } from "./dto/create-rate-card.dto";
 import { UpdateRateCardDto } from "./dto/update-rate-card.dto";
 import { AddRateCardItemDto } from "./dto/add-rate-card-item.dto";
 import { ListRateCardsQueryDto } from "./dto/list-rate-cards-query.dto";
+import { ResolveRateDto } from "./dto/resolve-rate.dto";
 import { RateCardsService } from "./rate-cards.service";
 
 @ApiTags("rate-cards")
@@ -22,6 +23,14 @@ export class RateCardsController {
   @ApiOperation({ summary: "List rate cards" })
   list(@Query() query: ListRateCardsQueryDto) {
     return this.rateCardsService.list(query);
+  }
+
+  @Post("resolve")
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.ACCOUNTS, Role.AUDITOR)
+  @ApiOperation({ summary: "Resolve the applicable rate card item for a trip context" })
+  resolve(@Body() dto: ResolveRateDto) {
+    return this.rateCardsService.resolve(dto);
   }
 
   @Get(":id")

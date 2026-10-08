@@ -6,6 +6,7 @@ import { CreateRateCardDto } from "./dto/create-rate-card.dto";
 import { UpdateRateCardDto } from "./dto/update-rate-card.dto";
 import { AddRateCardItemDto } from "./dto/add-rate-card-item.dto";
 import { ListRateCardsQueryDto } from "./dto/list-rate-cards-query.dto";
+import { ResolveRateDto } from "./dto/resolve-rate.dto";
 
 @Injectable()
 export class RateCardsService {
@@ -183,5 +184,105 @@ export class RateCardsService {
       data: { status: "INACTIVE", deletedAt: new Date() },
     });
     return { success: true };
+  }
+
+  async resolve(dto: ResolveRateDto) {
+    const onDate = new Date(dto.onDate);
+    if (isNaN(onDate.getTime())) {
+      throw new BadRequestException("onDate must be a valid ISO date.");
+    }
+
+    // 1. Find matching rate cards (active, valid on the date, matching counterparty)
+    const counterpartyFilter =
+      dto.counterpartyType === CounterpartyType.CLIENT
+        ? { clientId: dto.counterpartyId }
+        : { vendorId: dto.counterpartyId };
+
+    const cards = await this.rateCard.findMany({
+      where: {
+        ...counterpartyFilter,
+        status: "ACTIVE",
+        deletedAt: null,
+        validFrom: { lte: onDate },
+        OR: [
+          { validTo: null },
+          { validTo: { gte: onDate } },
+        ],
+      },
+      include: {
+        items: {
+          where: {
+            rateType: dto.rateType,
+            AND: [
+              ...(dto.routeId ? [{ OR: [{ routeId: null }, { routeId: dto.routeId }] }] : []),
+              ...(dto.tripType ? [{ OR: [{ tripType: null }, { tripType: dto.tripType }] }] : []),
+              ...(dto.serviceType ? [{ OR: [{ serviceType: null }, { serviceType: dto.serviceType }] }] : []),
+            ],
+          },
+          orderBy: { createdAt: "desc" },
+        },
+      },
+    });
+
+    if (cards.length === 0) {
+      throw new NotFoundException(
+        `No active rate card found for ${dto.counterpartyType} on ${dto.onDate}.`,
+      );
+    }
+
+    // 2. Flatten all matching items across cards, compute specificity score
+    type ScoredItem = {
+      item: (typeof cards)[number]["items"][number];
+      cardId: string;
+      cardName: string;
+      score: number;
+      createdAt: Date;
+    };
+
+    const scored: ScoredItem[] = [];
+    for (const card of cards) {
+      for (const item of card.items) {
+        const routeMatch = item.routeId === dto.routeId;
+        const tripTypeMatch = item.tripType === dto.tripType;
+        const serviceTypeMatch = item.serviceType === dto.serviceType;
+        const score =
+          (routeMatch ? 1 : 0) +
+          (tripTypeMatch ? 1 : 0) +
+          (serviceTypeMatch ? 1 : 0);
+        scored.push({
+          item,
+          cardId: card.id,
+          cardName: card.name,
+          score,
+          createdAt: item.createdAt,
+        });
+      }
+    }
+
+    if (scored.length === 0) {
+      throw new NotFoundException(
+        `No rate card item matches the given context (rateType=${dto.rateType}, routeId=${dto.routeId ?? "—"}, tripType=${dto.tripType ?? "—"}, serviceType=${dto.serviceType ?? "—"}).`,
+      );
+    }
+
+    // 3. Sort: highest score first, then most recent
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    });
+
+    const winner = scored[0];
+
+    return {
+      rateCardId: winner.cardId,
+      rateCardName: winner.cardName,
+      rateCardItemId: winner.item.id,
+      rateType: winner.item.rateType,
+      rate: winner.item.rate,
+      routeId: winner.item.routeId,
+      tripType: winner.item.tripType,
+      serviceType: winner.item.serviceType,
+      score: winner.score,
+    };
   }
 }
