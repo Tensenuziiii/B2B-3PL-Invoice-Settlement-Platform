@@ -86,6 +86,17 @@ enum NotificationType {
   INVITATION
 }
 
+enum RateType {
+  FIXED_TRIP
+  PER_DELIVERY
+  PER_KM
+}
+
+enum CounterpartyType {
+  CLIENT
+  VENDOR
+}
+
 // ============================================================
 // TENANT ROOT
 // ============================================================
@@ -113,6 +124,8 @@ model Organization {
   clients           Client[]
   vendors           Vendor[]
   routes            Route[]
+  rateCards         RateCard[]
+  rateCardItems     RateCardItem[]
   trips             Trip[]
   tripStops         TripStop[]
   pods              Pod[]
@@ -261,6 +274,7 @@ model Client {
   users    User[]
   trips    Trip[]
   invoices Invoice[]
+  rateCards RateCard[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -541,6 +555,8 @@ model Vendor {
   updatedAt        DateTime  @updatedAt @db.Timestamptz(6)
   deletedAt        DateTime? @db.Timestamptz(6)
 
+  rateCards RateCard[]
+
   @@unique([organizationId, code])
   @@index([organizationId])
   @@index([organizationId, status])
@@ -560,9 +576,58 @@ model Route {
   updatedAt             DateTime  @updatedAt @db.Timestamptz(6)
   deletedAt             DateTime? @db.Timestamptz(6)
 
+  rateCardItems RateCardItem[]
+
   @@unique([organizationId, name])
   @@index([organizationId])
   @@index([organizationId, status])
+}
+
+model RateCard {
+  id                String    @id @default(uuid()) @db.Uuid
+  organizationId    String    @db.Uuid
+  organization      Organization @relation(fields: [organizationId], references: [id])
+  name              String
+  counterpartyType  CounterpartyType
+  clientId          String?   @db.Uuid
+  client            Client?   @relation(fields: [clientId], references: [id])
+  vendorId          String?   @db.Uuid
+  vendor            Vendor?   @relation(fields: [vendorId], references: [id])
+  validFrom         DateTime  @db.Timestamptz(6)
+  validTo           DateTime? @db.Timestamptz(6)
+  status            String    @default("ACTIVE")
+  notes             String?
+  createdAt         DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt         DateTime? @db.Timestamptz(6)
+
+  items RateCardItem[]
+
+  @@index([organizationId])
+  @@index([organizationId, counterpartyType, clientId])
+  @@index([organizationId, counterpartyType, vendorId])
+  @@index([organizationId, status])
+  @@index([organizationId, validFrom, validTo])
+}
+
+model RateCardItem {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  rateCardId     String    @db.Uuid
+  rateCard       RateCard  @relation(fields: [rateCardId], references: [id], onDelete: Cascade)
+  rateType       RateType
+  routeId        String?   @db.Uuid
+  route          Route?    @relation(fields: [routeId], references: [id])
+  tripType       String?
+  serviceType    String?
+  rate           Int       // paise or rupees-per-unit — consistent with spec §30 (INR)
+  notes          String?
+  createdAt      DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([rateCardId])
+  @@index([organizationId, rateType])
 }
 
 model AuditLog {

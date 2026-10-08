@@ -235,7 +235,38 @@ async function main() {
       });
     }
   }
+  
   console.log(`✓ Role permissions mapped for ${Object.keys(rolePermissionMap).length} roles`);
+
+  // ============================================================
+  // 7. Sample rate card
+  // ============================================================
+  const existingRateCard = await prisma.rateCard.findFirst({
+    where: { organizationId: org.id, name: "METRO-STD-2026" },
+  });
+
+  if (!existingRateCard) {
+    await prisma.rateCard.create({
+      data: {
+        organizationId: org.id,
+        name: "METRO-STD-2026",
+        counterpartyType: "CLIENT",
+        clientId: client.id,
+        validFrom: new Date("2026-04-01"),
+        validTo: null,
+        status: "ACTIVE",
+        notes: "Standard FY26 rate card for Metro Cash & Carry",
+        items: {
+          create: [
+            { organizationId: org.id, rateType: "FIXED_TRIP", rate: 2500000, tripType: "FTL" },           // ₹25,000
+            { organizationId: org.id, rateType: "PER_DELIVERY", rate: 150000, tripType: "PTL" },          // ₹1,500
+            { organizationId: org.id, rateType: "PER_KM", rate: 5500, tripType: "FTL", serviceType: "STANDARD" }, // ₹55/km
+          ],
+        },
+      },
+    });
+    console.log("✓ Rate card: METRO-STD-2026 with 3 items");
+  }
 
   console.log('\n✨ Seed complete.\n');
   console.log('Login credentials (password for all users):');
