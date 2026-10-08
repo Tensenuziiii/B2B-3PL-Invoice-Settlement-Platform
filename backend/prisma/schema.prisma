@@ -112,6 +112,7 @@ model Organization {
   drivers           Driver[]
   clients           Client[]
   vendors           Vendor[]
+  routes            Route[]
   trips             Trip[]
   tripStops         TripStop[]
   pods              Pod[]
@@ -541,6 +542,25 @@ model Vendor {
   deletedAt        DateTime? @db.Timestamptz(6)
 
   @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([organizationId, status])
+}
+
+model Route {
+  id                    String    @id @default(uuid()) @db.Uuid
+  organizationId        String    @db.Uuid
+  organization          Organization @relation(fields: [organizationId], references: [id])
+  name                  String
+  origin                String
+  destination           String
+  expectedKm            Int
+  standardTollEstimate  Int       @default(0)
+  status                String    @default("ACTIVE")
+  createdAt             DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt             DateTime? @db.Timestamptz(6)
+
+  @@unique([organizationId, name])
   @@index([organizationId])
   @@index([organizationId, status])
 }
