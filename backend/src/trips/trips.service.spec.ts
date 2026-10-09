@@ -21,6 +21,9 @@ describe("TripsService", () => {
   let collectionFindMany: jest.Mock;
   let tripExpenseCreate: jest.Mock;
   let tripExpenseFindMany: jest.Mock;
+  let tripStopFindMany: jest.Mock;
+  let eodTallyFindFirst: jest.Mock;
+  let eodTallyCreate: jest.Mock;
   let nextTripNumber: jest.Mock;
   let mockTx: any;
   let prismaTransaction: jest.Mock;
@@ -76,6 +79,9 @@ describe("TripsService", () => {
     collectionFindMany = jest.fn().mockResolvedValue([]);
     tripExpenseCreate = jest.fn().mockImplementation((args: any) => Promise.resolve({ id: "exp-1", ...args.data }));
     tripExpenseFindMany = jest.fn().mockResolvedValue([]);
+    tripStopFindMany = jest.fn().mockResolvedValue([]);
+    eodTallyFindFirst = jest.fn().mockResolvedValue(null);
+    eodTallyCreate = jest.fn().mockImplementation((args: any) => Promise.resolve({ id: "tally-1", ...args.data }));
 
     mockTx = {
       trip: {
@@ -87,7 +93,15 @@ describe("TripsService", () => {
       },
       tripStop: {
         findFirst: tripStopFindFirst,
+        findMany: tripStopFindMany,
         update: tripStopUpdate,
+      },
+      tripExpense: {
+        findMany: tripExpenseFindMany,
+      },
+      eodTally: {
+        findFirst: eodTallyFindFirst,
+        create: eodTallyCreate,
       },
       auditReview: {
         create: auditReviewCreate,
@@ -118,6 +132,9 @@ describe("TripsService", () => {
       tripExpense: {
         create: tripExpenseCreate,
         findMany: tripExpenseFindMany,
+      },
+      eodTally: {
+        findFirst: eodTallyFindFirst,
       },
       $transaction: prismaTransaction,
     } as unknown as PrismaService;
@@ -496,5 +513,72 @@ describe("TripsService", () => {
     expect(summary.stopsTotal).toBe(2);
     expect(summary.stopsDelivered).toBe(2);
     expect(summary.actualKm).toBe(150);
+  });
+
+  it("27. closeEod() rejects when status is not DELIVERED", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, status: "IN_PROGRESS", version: 0 });
+
+    await expect(
+      service.closeEod("trp-123", { version: 0 }, { sub: "usr-123", role: "ADMIN" }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("28. closeEod() rejects when EOD already closed", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, status: "DELIVERED", version: 0 });
+    eodTallyFindFirst.mockResolvedValue({ id: "tally-existing", tripId: "trp-123" });
+
+    await expect(
+      service.closeEod("trp-123", { version: 0 }, { sub: "usr-123", role: "ADMIN" }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("29. closeEod() computes discrepancy = actualCash - netExpected", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, status: "DELIVERED", version: 0 });
+    eodTallyFindFirst.mockResolvedValue(null);
+    tripStopFindMany.mockResolvedValue([
+      { id: "s1", expectedCollection: 5000, collection: { actualAmount: 4800 } },
+      { id: "s2", expectedCollection: 3000, collection: { actualAmount: 3200 } },
+    ]);
+    tripExpenseFindMany.mockResolvedValue([]);
+
+    const tally = await service.closeEod("trp-123", { version: 0 }, { sub: "usr-123", role: "ADMIN" });
+
+    expect(tally.actualCash).toBe(8000);
+    expect(tally.netExpected).toBe(8000);
+    expect(tally.discrepancy).toBe(0);
+
+    tripStopFindMany.mockResolvedValue([
+      { id: "s1", expectedCollection: 5000, collection: { actualAmount: 4500 } },
+    ]);
+    const tally2 = await service.closeEod("trp-123", { version: 0 }, { sub: "usr-123", role: "ADMIN" });
+    expect(tally2.actualCash).toBe(4500);
+    expect(tally2.netExpected).toBe(5000);
+    expect(tally2.discrepancy).toBe(-500);
+  });
+
+  it("30. closeEod() sums TOLL expenses into toll field", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, status: "DELIVERED", version: 0 });
+    eodTallyFindFirst.mockResolvedValue(null);
+    tripStopFindMany.mockResolvedValue([]);
+    tripExpenseFindMany.mockResolvedValue([
+      { type: "TOLL", amount: 150 },
+      { type: "TOLL", amount: 250 },
+      { type: "FUEL", amount: 1000 },
+      { type: "EMERGENCY_FUEL", amount: 200 },
+      { type: "DRIVER_ALLOWANCE", amount: 500 },
+    ]);
+
+    const tally = await service.closeEod("trp-123", { version: 0 }, { sub: "usr-123", role: "ADMIN" });
+
+    expect(tally.toll).toBe(400);
+    expect(tally.fuel).toBe(1200);
+    expect(tally.allowance).toBe(500);
+  });
+
+  it("31. getEod() throws NotFoundException when no tally", async () => {
+    tripFindFirst.mockResolvedValue(mockTrip);
+    eodTallyFindFirst.mockResolvedValue(null);
+
+    await expect(service.getEod("trp-123")).rejects.toThrow(NotFoundException);
   });
 });

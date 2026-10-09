@@ -27,6 +27,7 @@ import { AuditTripDto } from "./dto/audit-trip.dto";
 import { CompleteStopDto } from "./dto/complete-stop.dto";
 import { RecordCollectionDto } from "./dto/record-collection.dto";
 import { RecordExpenseDto } from "./dto/record-expense.dto";
+import { EodCloseDto } from "./dto/eod-close.dto";
 import { TripsService } from "./trips.service";
 
 @ApiTags("trips")
@@ -167,5 +168,19 @@ export class TripsController {
   @ApiOperation({ summary: "Mark ready for billing (AUDITED → READY_FOR_BILLING)" })
   readyForBilling(@Param("id") id: string, @Body() dto: TripActionDto, @Req() req: any) {
     return this.tripsService.markReadyForBilling(id, dto, req.user);
+  }
+
+  @Post(":id/eod")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER)
+  @ApiOperation({ summary: "Close EOD for a trip (DELIVERED → EOD closed tally)" })
+  closeEod(@Param("id") id: string, @Body() dto: EodCloseDto, @Req() req: any) {
+    return this.tripsService.closeEod(id, dto, req.user);
+  }
+
+  @Get(":id/eod")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.AUDITOR, Role.ACCOUNTS)
+  @ApiOperation({ summary: "Get EOD tally for a trip" })
+  getEod(@Param("id") id: string) {
+    return this.tripsService.getEod(id);
   }
 }

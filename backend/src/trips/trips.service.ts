@@ -19,6 +19,7 @@ import { AuditTripDto } from "./dto/audit-trip.dto";
 import { CompleteStopDto } from "./dto/complete-stop.dto";
 import { RecordCollectionDto } from "./dto/record-collection.dto";
 import { RecordExpenseDto } from "./dto/record-expense.dto";
+import { EodCloseDto } from "./dto/eod-close.dto";
 
 @Injectable()
 export class TripsService {
@@ -610,5 +611,70 @@ export class TripsService {
           ? trip.odometerEnd - trip.odometerStart
           : null,
     };
+  }
+
+  async closeEod(id: string, dto: EodCloseDto, user: { sub: string; role: string }) {
+    const { organizationId } = requireTenant();
+
+    return this.prisma.$transaction(async (tx) => {
+      const trip = await this.loadTripForAction(tx, id);
+      this.assertVersion(trip, dto.version);
+
+      if (trip.status !== "DELIVERED") {
+        throw new BadRequestException(`Cannot close EOD while trip is ${trip.status}.`);
+      }
+
+      const existing = await tx.eodTally.findFirst({ where: { tripId: id } });
+      if (existing) {
+        throw new BadRequestException("EOD for this trip is already closed.");
+      }
+
+      const stops = await tx.tripStop.findMany({
+        where: { tripId: id },
+        include: { collection: true },
+      });
+
+      const expenses = await tx.tripExpense.findMany({ where: { tripId: id } });
+
+      const sumByType = (t: string) =>
+        expenses.filter((e) => e.type === t).reduce((s, e) => s + e.amount, 0);
+
+      const toll = sumByType("TOLL");
+      const fuel = sumByType("FUEL") + sumByType("EMERGENCY_FUEL");
+      const allowance = sumByType("DRIVER_ALLOWANCE");
+      const actualCash = stops.reduce((s, st) => s + (st.collection?.actualAmount ?? 0), 0);
+      const netExpected = stops.reduce((s, st) => s + (st.expectedCollection ?? 0), 0);
+      const discrepancy = actualCash - netExpected;
+
+      const tally = await tx.eodTally.create({
+        data: {
+          organizationId,
+          tripId: id,
+          toll,
+          fuel,
+          allowance,
+          actualCash,
+          netExpected,
+          discrepancy,
+        },
+      });
+
+      // Bump trip version (status remains DELIVERED — next transition is closeTrip to AUDIT_PENDING)
+      await tx.trip.update({
+        where: { id },
+        data: { version: { increment: 1 } },
+      });
+
+      return tally;
+    });
+  }
+
+  async getEod(id: string) {
+    const trip = await this.prisma.trip.findFirst({ where: { id, deletedAt: null } });
+    if (!trip) throw new NotFoundException("Trip not found.");
+
+    const tally = await this.prisma.eodTally.findFirst({ where: { tripId: id } });
+    if (!tally) throw new NotFoundException("EOD has not been closed for this trip.");
+    return tally;
   }
 }
