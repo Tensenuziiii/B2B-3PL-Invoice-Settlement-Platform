@@ -18,6 +18,9 @@ describe("Trips (e2e)", () => {
 
   let orgATripId: string;
   let orgBTripId: string;
+  let driverA: { id: string };
+  let vehicleA: { id: string };
+  let lifecycleTripId: string;
 
   async function cleanup() {
     if (!prisma) return;
@@ -27,10 +30,13 @@ describe("Trips (e2e)", () => {
     });
     const orgIds = orgs.map((o) => o.id);
     if (orgIds.length > 0) {
+      await prisma.auditReview.deleteMany({ where: { organizationId: { in: orgIds } } });
       await prisma.collection.deleteMany({ where: { organizationId: { in: orgIds } } });
       await prisma.podDocument.deleteMany({ where: { organizationId: { in: orgIds } } });
       await prisma.tripStop.deleteMany({ where: { organizationId: { in: orgIds } } });
       await prisma.trip.deleteMany({ where: { organizationId: { in: orgIds } } });
+      await prisma.vehicle.deleteMany({ where: { organizationId: { in: orgIds } } });
+      await prisma.driver.deleteMany({ where: { organizationId: { in: orgIds } } });
       await prisma.counter.deleteMany({
         where: {
           organizationId: { in: orgIds },
@@ -174,6 +180,25 @@ describe("Trips (e2e)", () => {
       },
     });
     orgBTripId = trpB.id;
+
+    // Seed Vehicle and Driver for Org A
+    const vA = await prisma.vehicle.create({
+      data: {
+        organizationId: orgA.id,
+        regNo: "MH-12-TRP-001",
+        currentOdometer: 1000,
+      },
+    });
+    vehicleA = { id: vA.id };
+
+    const dA = await prisma.driver.create({
+      data: {
+        organizationId: orgA.id,
+        name: "Driver A",
+        phone: "+919876543210",
+      },
+    });
+    driverA = { id: dA.id };
   }, 60000);
 
   afterAll(async () => {
@@ -298,5 +323,184 @@ describe("Trips (e2e)", () => {
         stops: [{ name: "Stop 1" }],
       })
       .expect(401);
+  }, 30000);
+
+  it("9. POST /trips/:id/start transitions ASSIGNED → IN_PROGRESS (200, status=IN_PROGRESS, version+1)", async () => {
+    const createRes = await request(app.getHttpServer())
+      .post("/trips")
+      .set("Authorization", `Bearer ${orgA.token}`)
+      .send({
+        origin: "Mumbai Hub",
+        destination: "Pune Dock",
+        driverId: driverA.id,
+        vehicleId: vehicleA.id,
+        odometerStart: 1000,
+        stops: [{ name: "Stop 1", sequence: 1, expectedQty: 10 }],
+      })
+      .expect(201);
+
+    lifecycleTripId = createRes.body.id;
+    expect(createRes.body.status).toBe("ASSIGNED");
+    expect(createRes.body.version).toBe(0);
+
+    const res = await request(app.getHttpServer())
+      .post(`/trips/${lifecycleTripId}/start`)
+      .set("Authorization", `Bearer ${orgA.token}`)
+      .send({ version: 0 })
+      .expect(200);
+
+    expect(res.body.id).toBe(lifecycleTripId);
+    expect(res.body.status).toBe("IN_PROGRESS");
+    expect(res.body.version).toBe(1);
+    expect(res.body.startedAt).toBeDefined();
+  }, 30000);
+
+  it("10. POST /trips/:id/start with stale version returns 409", async () => {
+    await request(app.getHttpServer())
+      .post(`/trips/${lifecycleTripId}/start`)
+      .set("Authorization", `Bearer ${orgA.token}`)
+      .send({ version: 0 })
+      .expect(409);
+  }, 30000);
+
+  it("11. POST /trips/:id/end with odometerEnd < odometerStart returns 400", async () => {
+    const odoTrip = await prisma.trip.create({
+      data: {
+        organizationId: orgA.id,
+        tripNumber: "TRP-202610-0888",
+        origin: "Origin",
+        destination: "Dest",
+        status: "DELIVERY_IN_PROGRESS",
+        driverId: driverA.id,
+        vehicleId: vehicleA.id,
+        odometerStart: 1000,
+        version: 0,
+      },
+    });
+
+    await request(app.getHttpServer())
+      .post(`/trips/${odoTrip.id}/end`)
+      .set("Authorization", `Bearer ${orgA.token}`)
+      .send({ version: 0, odometerEnd: 950 })
+      .expect(400);
+  }, 30000);
+
+  it("12. POST /trips/:id/audit with invalid status returns 400", async () => {
+    await request(app.getHttpServer())
+      .post(`/trips/${orgATripId}/audit`)
+      .set("Authorization", `Bearer ${orgA.token}`)
+      .send({
+        version: 0,
+        outcome: "AUDITED",
+        notes: "Invalid status audit attempt",
+      })
+      .expect(400);
+  }, 30000);
+
+  it("13. Full happy-path flow: create → start → arrive → end → close → audit → ready-for-billing (all 200s, statuses progress)", async () => {
+    // 1. Create
+    const createRes = await request(app.getHttpServer())
+      .post("/trips")
+      .set("Authorization", `Bearer ${orgA.token}`)
+      .send({
+        origin: "Alpha Hub",
+        destination: "Beta Hub",
+        driverId: driverA.id,
+        vehicleId: vehicleA.id,
+        odometerStart: 500,
+        stops: [
+          {
+            name: "Stop Alpha 1",
+            sequence: 1,
+            expectedQty: 25,
+            expectedCollection: 5000,
+          },
+        ],
+      })
+      .expect(201);
+
+    const tripId = createRes.body.id;
+    const stopId = createRes.body.tripStops[0].id;
+    expect(createRes.body.status).toBe("ASSIGNED");
+    expect(createRes.body.version).toBe(0);
+
+    // 2. Start (ASSIGNED → IN_PROGRESS)
+    const startRes = await request(app.getHttpServer())
+      .post(`/trips/${tripId}/start`)
+      .set("Authorization", `Bearer ${orgA.token}`)
+      .send({ version: 0 })
+      .expect(200);
+
+    expect(startRes.body.status).toBe("IN_PROGRESS");
+    expect(startRes.body.version).toBe(1);
+    expect(startRes.body.startedAt).toBeDefined();
+
+    // 3. Arrive (IN_PROGRESS → DELIVERY_IN_PROGRESS)
+    const arriveRes = await request(app.getHttpServer())
+      .post(`/trips/${tripId}/arrive`)
+      .set("Authorization", `Bearer ${orgA.token}`)
+      .send({ version: 1, tripStopId: stopId })
+      .expect(200);
+
+    expect(arriveRes.body.status).toBe("DELIVERY_IN_PROGRESS");
+    expect(arriveRes.body.version).toBe(2);
+
+    // 4. End (DELIVERY_IN_PROGRESS → DELIVERED)
+    const endRes = await request(app.getHttpServer())
+      .post(`/trips/${tripId}/end`)
+      .set("Authorization", `Bearer ${orgA.token}`)
+      .send({ version: 2, odometerEnd: 560 })
+      .expect(200);
+
+    expect(endRes.body.status).toBe("DELIVERED");
+    expect(endRes.body.version).toBe(3);
+    expect(endRes.body.odometerEnd).toBe(560);
+    expect(endRes.body.deliveredAt).toBeDefined();
+
+    // 5. Close (DELIVERED → AUDIT_PENDING)
+    const closeRes = await request(app.getHttpServer())
+      .post(`/trips/${tripId}/close`)
+      .set("Authorization", `Bearer ${orgA.token}`)
+      .send({ version: 3 })
+      .expect(200);
+
+    expect(closeRes.body.status).toBe("AUDIT_PENDING");
+    expect(closeRes.body.version).toBe(4);
+    expect(closeRes.body.auditRequestedAt).toBeDefined();
+    expect(closeRes.body.closedAt).toBeDefined();
+
+    // 6. Audit (AUDIT_PENDING → AUDITED)
+    const auditRes = await request(app.getHttpServer())
+      .post(`/trips/${tripId}/audit`)
+      .set("Authorization", `Bearer ${orgA.token}`)
+      .send({
+        version: 4,
+        outcome: "AUDITED",
+        notes: "All paperwork and POD verified",
+      })
+      .expect(200);
+
+    expect(auditRes.body.status).toBe("AUDITED");
+    expect(auditRes.body.version).toBe(5);
+    expect(auditRes.body.auditedAt).toBeDefined();
+
+    // 7. Ready for billing (AUDITED → READY_FOR_BILLING)
+    const billingRes = await request(app.getHttpServer())
+      .post(`/trips/${tripId}/ready-for-billing`)
+      .set("Authorization", `Bearer ${orgA.token}`)
+      .send({ version: 5 })
+      .expect(200);
+
+    expect(billingRes.body.status).toBe("READY_FOR_BILLING");
+    expect(billingRes.body.version).toBe(6);
+    expect(billingRes.body.readyForBillingAt).toBeDefined();
+  }, 45000);
+
+  it("14. Cross-tenant: Org A cannot start Org B's trip → 404", async () => {
+    await request(app.getHttpServer())
+      .post(`/trips/${orgBTripId}/start`)
+      .set("Authorization", `Bearer ${orgA.token}`)
+      .send({ version: 0 })
+      .expect(404);
   }, 30000);
 });

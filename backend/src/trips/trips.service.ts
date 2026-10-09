@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { requireTenant } from "../core/tenant/tenant.context";
@@ -6,6 +12,10 @@ import { TripNumberService } from "./trip-number.service";
 import { CreateTripDto } from "./dto/create-trip.dto";
 import { UpdateTripDto } from "./dto/update-trip.dto";
 import { ListTripsQueryDto } from "./dto/list-trips-query.dto";
+import { TripActionDto } from "./dto/trip-action.dto";
+import { EndTripDto } from "./dto/end-trip.dto";
+import { ArriveStopDto } from "./dto/arrive-stop.dto";
+import { AuditTripDto } from "./dto/audit-trip.dto";
 
 @Injectable()
 export class TripsService {
@@ -13,6 +23,34 @@ export class TripsService {
     private readonly prisma: PrismaService,
     private readonly tripNumber: TripNumberService,
   ) {}
+
+  private async loadTripForAction(tx: Prisma.TransactionClient, id: string) {
+    const trip = await tx.trip.findFirst({
+      where: { id, deletedAt: null },
+      include: { driver: true },
+    });
+    if (!trip) throw new NotFoundException("Trip not found.");
+    return trip;
+  }
+
+  private assertVersion(trip: { version: number }, expected: number) {
+    if (trip.version !== expected) {
+      throw new ConflictException(
+        `Trip was modified by someone else. Expected version ${expected}, found ${trip.version}.`,
+      );
+    }
+  }
+
+  private assertActorCanActOnTrip(
+    trip: { driverId: string | null; driver?: { userId: string | null } | null },
+    user: { sub: string; role: string },
+  ) {
+    if (user.role === "DRIVER") {
+      if (!trip.driver || trip.driver.userId !== user.sub) {
+        throw new ForbiddenException("You can only act on trips assigned to you.");
+      }
+    }
+  }
 
   async list(query: ListTripsQueryDto) {
     const where: Prisma.TripWhereInput = { deletedAt: null };
@@ -162,5 +200,255 @@ export class TripsService {
       data: { deletedAt: new Date(), status: "ASSIGNED" as any },
     });
     return { success: true };
+  }
+
+  async startTrip(id: string, dto: TripActionDto, user: { sub: string; role: string }) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const trip = await this.loadTripForAction(tx, id);
+        this.assertVersion(trip, dto.version);
+        this.assertActorCanActOnTrip(trip, user);
+
+        if (trip.status !== "ASSIGNED") {
+          throw new BadRequestException(`Cannot start a trip in ${trip.status} state.`);
+        }
+        if (!trip.driverId) {
+          throw new BadRequestException("Trip has no driver assigned.");
+        }
+        if (!trip.vehicleId) {
+          throw new BadRequestException("Trip has no vehicle assigned.");
+        }
+
+        const updated = await tx.trip.updateMany({
+          where: { id, version: dto.version, status: "ASSIGNED" },
+          data: {
+            status: "IN_PROGRESS",
+            version: { increment: 1 },
+            startedAt: new Date(),
+          },
+        });
+        if (updated.count === 0) {
+          throw new ConflictException("Trip state changed during update.");
+        }
+        return tx.trip.findUniqueOrThrow({ where: { id } });
+      },
+      { timeout: 20000, maxWait: 10000 },
+    );
+  }
+
+  async arriveAtStop(id: string, dto: ArriveStopDto, user: { sub: string; role: string }) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const trip = await this.loadTripForAction(tx, id);
+        this.assertVersion(trip, dto.version);
+        this.assertActorCanActOnTrip(trip, user);
+
+        if (trip.status !== "IN_PROGRESS" && trip.status !== "DELIVERY_IN_PROGRESS") {
+          throw new BadRequestException(`Cannot arrive at stop while trip is ${trip.status}.`);
+        }
+
+        const stop = await tx.tripStop.findFirst({
+          where: { id: dto.tripStopId, tripId: id },
+        });
+        if (!stop) throw new NotFoundException("Trip stop not found.");
+        if (stop.status !== "PENDING") {
+          throw new BadRequestException(`Stop is already in ${stop.status} state.`);
+        }
+
+        await tx.tripStop.update({
+          where: { id: stop.id },
+          data: { status: "IN_PROGRESS" },
+        });
+
+        // If this is the first arrival, transition trip to DELIVERY_IN_PROGRESS
+        if (trip.status === "IN_PROGRESS") {
+          const updated = await tx.trip.updateMany({
+            where: { id, version: dto.version, status: "IN_PROGRESS" },
+            data: {
+              status: "DELIVERY_IN_PROGRESS",
+              version: { increment: 1 },
+            },
+          });
+          if (updated.count === 0) {
+            throw new ConflictException("Trip state changed during update.");
+          }
+        } else {
+          // Just bump version
+          await tx.trip.update({
+            where: { id },
+            data: { version: { increment: 1 } },
+          });
+        }
+
+        return tx.trip.findUniqueOrThrow({
+          where: { id },
+          include: { tripStops: { orderBy: { sequence: "asc" } } },
+        });
+      },
+      { timeout: 20000, maxWait: 10000 },
+    );
+  }
+
+  async endTrip(id: string, dto: EndTripDto, user: { sub: string; role: string }) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const trip = await this.loadTripForAction(tx, id);
+        this.assertVersion(trip, dto.version);
+        this.assertActorCanActOnTrip(trip, user);
+
+        if (trip.status !== "DELIVERY_IN_PROGRESS") {
+          throw new BadRequestException(`Cannot end a trip in ${trip.status} state.`);
+        }
+        if (trip.odometerStart == null) {
+          throw new BadRequestException("Trip has no odometerStart recorded.");
+        }
+        if (dto.odometerEnd < trip.odometerStart) {
+          throw new BadRequestException(
+            `odometerEnd (${dto.odometerEnd}) cannot be less than odometerStart (${trip.odometerStart}).`,
+          );
+        }
+
+        const updated = await tx.trip.updateMany({
+          where: { id, version: dto.version, status: "DELIVERY_IN_PROGRESS" },
+          data: {
+            status: "DELIVERED",
+            version: { increment: 1 },
+            odometerEnd: dto.odometerEnd,
+            deliveredAt: new Date(),
+          },
+        });
+        if (updated.count === 0) {
+          throw new ConflictException("Trip state changed during update.");
+        }
+        return tx.trip.findUniqueOrThrow({ where: { id } });
+      },
+      { timeout: 20000, maxWait: 10000 },
+    );
+  }
+
+  async closeTrip(id: string, dto: TripActionDto, user: { sub: string; role: string }) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const trip = await this.loadTripForAction(tx, id);
+        this.assertVersion(trip, dto.version);
+
+        if (trip.status !== "DELIVERED") {
+          throw new BadRequestException(`Cannot close a trip in ${trip.status} state.`);
+        }
+
+        const updated = await tx.trip.updateMany({
+          where: { id, version: dto.version, status: "DELIVERED" },
+          data: {
+            status: "AUDIT_PENDING",
+            version: { increment: 1 },
+            auditRequestedAt: new Date(),
+            closedAt: new Date(),
+          },
+        });
+        if (updated.count === 0) {
+          throw new ConflictException("Trip state changed during update.");
+        }
+        return tx.trip.findUniqueOrThrow({ where: { id } });
+      },
+      { timeout: 20000, maxWait: 10000 },
+    );
+  }
+
+  async auditTrip(id: string, dto: AuditTripDto, user: { sub: string; role: string }) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const trip = await this.loadTripForAction(tx, id);
+        this.assertVersion(trip, dto.version);
+
+        if (trip.status !== "AUDIT_PENDING") {
+          throw new BadRequestException(`Cannot audit a trip in ${trip.status} state.`);
+        }
+
+        const newStatus = dto.outcome === "AUDITED" ? "AUDITED" : "CORRECTION_REQUESTED";
+        const updated = await tx.trip.updateMany({
+          where: { id, version: dto.version, status: "AUDIT_PENDING" },
+          data: {
+            status: newStatus,
+            version: { increment: 1 },
+            ...(dto.outcome === "AUDITED" ? { auditedAt: new Date() } : {}),
+          },
+        });
+        if (updated.count === 0) {
+          throw new ConflictException("Trip state changed during update.");
+        }
+
+        const { organizationId } = requireTenant();
+        await tx.auditReview.create({
+          data: {
+            organizationId,
+            tripId: id,
+            reviewerId: user.sub,
+            outcome: dto.outcome,
+            notes: dto.notes,
+            checklist: dto.checklist ?? undefined,
+          } as any,
+        });
+
+        return tx.trip.findUniqueOrThrow({
+          where: { id },
+          include: { auditReviews: { orderBy: { createdAt: "desc" }, take: 1 } },
+        });
+      },
+      { timeout: 20000, maxWait: 10000 },
+    );
+  }
+
+  async resubmitForAudit(id: string, dto: TripActionDto, user: { sub: string; role: string }) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const trip = await this.loadTripForAction(tx, id);
+        this.assertVersion(trip, dto.version);
+
+        if (trip.status !== "CORRECTION_REQUESTED") {
+          throw new BadRequestException(`Cannot resubmit a trip in ${trip.status} state.`);
+        }
+
+        const updated = await tx.trip.updateMany({
+          where: { id, version: dto.version, status: "CORRECTION_REQUESTED" },
+          data: {
+            status: "AUDIT_PENDING",
+            version: { increment: 1 },
+            auditRequestedAt: new Date(),
+          },
+        });
+        if (updated.count === 0) {
+          throw new ConflictException("Trip state changed during update.");
+        }
+        return tx.trip.findUniqueOrThrow({ where: { id } });
+      },
+      { timeout: 20000, maxWait: 10000 },
+    );
+  }
+
+  async markReadyForBilling(id: string, dto: TripActionDto, user: { sub: string; role: string }) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const trip = await this.loadTripForAction(tx, id);
+        this.assertVersion(trip, dto.version);
+
+        if (trip.status !== "AUDITED") {
+          throw new BadRequestException(`Cannot mark ready for billing a trip in ${trip.status} state.`);
+        }
+
+        const updated = await tx.trip.updateMany({
+          where: { id, version: dto.version, status: "AUDITED" },
+          data: {
+            status: "READY_FOR_BILLING",
+            version: { increment: 1 },
+            readyForBillingAt: new Date(),
+          },
+        });
+        if (updated.count === 0) {
+          throw new ConflictException("Trip state changed during update.");
+        }
+        return tx.trip.findUniqueOrThrow({ where: { id } });
+      },
+      { timeout: 20000, maxWait: 10000 },
+    );
   }
 }

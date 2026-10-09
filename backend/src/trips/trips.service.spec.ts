@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { TripNumberService } from "./trip-number.service";
 import { TripsService } from "./trips.service";
@@ -11,6 +11,11 @@ describe("TripsService", () => {
   let tripFindFirst: jest.Mock;
   let tripCreate: jest.Mock;
   let tripUpdate: jest.Mock;
+  let tripUpdateMany: jest.Mock;
+  let tripFindUniqueOrThrow: jest.Mock;
+  let tripStopFindFirst: jest.Mock;
+  let tripStopUpdate: jest.Mock;
+  let auditReviewCreate: jest.Mock;
   let nextTripNumber: jest.Mock;
   let mockTx: any;
   let prismaTransaction: jest.Mock;
@@ -20,10 +25,12 @@ describe("TripsService", () => {
     organizationId: "org-123",
     tripNumber: "TRP-202610-0001",
     status: "ASSIGNED",
+    version: 0,
     clientId: "cli-123",
     vendorId: null,
     routeId: null,
     driverId: "drv-123",
+    driver: { id: "drv-123", userId: "usr-123" },
     vehicleId: "veh-123",
     origin: "Mumbai",
     destination: "Pune",
@@ -54,10 +61,26 @@ describe("TripsService", () => {
     tripFindFirst = jest.fn().mockResolvedValue(mockTrip);
     tripCreate = jest.fn().mockResolvedValue(mockTrip);
     tripUpdate = jest.fn().mockResolvedValue(mockTrip);
+    tripUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+    tripFindUniqueOrThrow = jest.fn().mockResolvedValue(mockTrip);
+    tripStopFindFirst = jest.fn().mockResolvedValue({ id: "stop-1", status: "PENDING" });
+    tripStopUpdate = jest.fn().mockResolvedValue({ id: "stop-1", status: "IN_PROGRESS" });
+    auditReviewCreate = jest.fn().mockResolvedValue({ id: "rev-1" });
 
     mockTx = {
       trip: {
+        findFirst: tripFindFirst,
         create: tripCreate,
+        update: tripUpdate,
+        updateMany: tripUpdateMany,
+        findUniqueOrThrow: tripFindUniqueOrThrow,
+      },
+      tripStop: {
+        findFirst: tripStopFindFirst,
+        update: tripStopUpdate,
+      },
+      auditReview: {
+        create: auditReviewCreate,
       },
     };
 
@@ -200,6 +223,119 @@ describe("TripsService", () => {
               expect.objectContaining({ name: "Hub C", sequence: 3 }),
             ],
           },
+        }),
+      }),
+    );
+  });
+
+  it("11. startTrip() throws NotFoundException for unknown id", async () => {
+    tripFindFirst.mockResolvedValue(null);
+
+    await expect(
+      service.startTrip("unknown-id", { version: 0 }, { sub: "usr-123", role: "ADMIN" }),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it("12. startTrip() throws ConflictException on stale version", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, version: 1 });
+
+    await expect(
+      service.startTrip("trp-123", { version: 0 }, { sub: "usr-123", role: "ADMIN" }),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it("13. startTrip() throws BadRequestException when status is not ASSIGNED", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, status: "IN_PROGRESS" });
+
+    await expect(
+      service.startTrip("trp-123", { version: 0 }, { sub: "usr-123", role: "ADMIN" }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("14. startTrip() throws BadRequestException when no driver assigned", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, driverId: null });
+
+    await expect(
+      service.startTrip("trp-123", { version: 0 }, { sub: "usr-123", role: "ADMIN" }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("15. endTrip() throws BadRequestException when odometerEnd < odometerStart", async () => {
+    tripFindFirst.mockResolvedValue({
+      ...mockTrip,
+      status: "DELIVERY_IN_PROGRESS",
+      odometerStart: 1000,
+    });
+
+    await expect(
+      service.endTrip("trp-123", { version: 0, odometerEnd: 900 }, { sub: "usr-123", role: "ADMIN" }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("16. endTrip() throws BadRequestException when status is not DELIVERY_IN_PROGRESS", async () => {
+    tripFindFirst.mockResolvedValue({
+      ...mockTrip,
+      status: "IN_PROGRESS",
+      odometerStart: 1000,
+    });
+
+    await expect(
+      service.endTrip("trp-123", { version: 0, odometerEnd: 1200 }, { sub: "usr-123", role: "ADMIN" }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("17. auditTrip() creates AuditReview row and transitions to AUDITED", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, status: "AUDIT_PENDING" });
+
+    await service.auditTrip(
+      "trp-123",
+      { version: 0, outcome: "AUDITED", notes: "All verified" },
+      { sub: "usr-123", role: "AUDITOR" },
+    );
+
+    expect(tripUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: "AUDIT_PENDING", version: 0 }),
+        data: expect.objectContaining({
+          status: "AUDITED",
+          auditedAt: expect.any(Date),
+        }),
+      }),
+    );
+    expect(auditReviewCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          organizationId: "org-123",
+          tripId: "trp-123",
+          outcome: "AUDITED",
+          notes: "All verified",
+        }),
+      }),
+    );
+  });
+
+  it("18. auditTrip() with CORRECTION_REQUESTED does not set auditedAt", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, status: "AUDIT_PENDING" });
+
+    await service.auditTrip(
+      "trp-123",
+      { version: 0, outcome: "CORRECTION_REQUESTED", notes: "Needs fix" },
+      { sub: "usr-123", role: "AUDITOR" },
+    );
+
+    expect(tripUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: "AUDIT_PENDING", version: 0 }),
+        data: expect.objectContaining({
+          status: "CORRECTION_REQUESTED",
+        }),
+      }),
+    );
+    expect(auditReviewCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          outcome: "CORRECTION_REQUESTED",
+          notes: "Needs fix",
         }),
       }),
     );
