@@ -16,6 +16,11 @@ describe("TripsService", () => {
   let tripStopFindFirst: jest.Mock;
   let tripStopUpdate: jest.Mock;
   let auditReviewCreate: jest.Mock;
+  let collectionFindFirst: jest.Mock;
+  let collectionCreate: jest.Mock;
+  let collectionFindMany: jest.Mock;
+  let tripExpenseCreate: jest.Mock;
+  let tripExpenseFindMany: jest.Mock;
   let nextTripNumber: jest.Mock;
   let mockTx: any;
   let prismaTransaction: jest.Mock;
@@ -66,6 +71,11 @@ describe("TripsService", () => {
     tripStopFindFirst = jest.fn().mockResolvedValue({ id: "stop-1", status: "PENDING" });
     tripStopUpdate = jest.fn().mockResolvedValue({ id: "stop-1", status: "IN_PROGRESS" });
     auditReviewCreate = jest.fn().mockResolvedValue({ id: "rev-1" });
+    collectionFindFirst = jest.fn().mockResolvedValue(null);
+    collectionCreate = jest.fn().mockImplementation((args: any) => Promise.resolve({ id: "col-1", ...args.data }));
+    collectionFindMany = jest.fn().mockResolvedValue([]);
+    tripExpenseCreate = jest.fn().mockImplementation((args: any) => Promise.resolve({ id: "exp-1", ...args.data }));
+    tripExpenseFindMany = jest.fn().mockResolvedValue([]);
 
     mockTx = {
       trip: {
@@ -97,6 +107,18 @@ describe("TripsService", () => {
         findFirst: tripFindFirst,
         update: tripUpdate,
       },
+      tripStop: {
+        findFirst: tripStopFindFirst,
+      },
+      collection: {
+        findFirst: collectionFindFirst,
+        create: collectionCreate,
+        findMany: collectionFindMany,
+      },
+      tripExpense: {
+        create: tripExpenseCreate,
+        findMany: tripExpenseFindMany,
+      },
       $transaction: prismaTransaction,
     } as unknown as PrismaService;
 
@@ -105,6 +127,10 @@ describe("TripsService", () => {
     } as unknown as TripNumberService;
 
     service = new TripsService(mockPrisma, mockTripNumberService);
+  });
+
+  afterEach(() => {
+    tenantStorage.disable();
   });
 
   it("1. list() filters by status", async () => {
@@ -339,5 +365,136 @@ describe("TripsService", () => {
         }),
       }),
     );
+  });
+
+  it("19. completeStop() rejects when status not IN_PROGRESS or DELIVERY_IN_PROGRESS", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, status: "ASSIGNED", version: 0 });
+
+    await expect(
+      service.completeStop("trp-123", "stop-1", { version: 0 }, { sub: "usr-123", role: "ADMIN" }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("20. completeStop() rejects when no POD documents exist", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, status: "DELIVERY_IN_PROGRESS", version: 0 });
+    tripStopFindFirst.mockResolvedValue({ id: "stop-1", tripId: "trp-123", status: "IN_PROGRESS", podDocuments: [] });
+
+    await expect(
+      service.completeStop("trp-123", "stop-1", { version: 0 }, { sub: "usr-123", role: "ADMIN" }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("21. completeStop() sets qtyMismatchFlag when deliveredQty != expectedQty", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, status: "DELIVERY_IN_PROGRESS", version: 0 });
+    tripStopFindFirst.mockResolvedValue({
+      id: "stop-1",
+      tripId: "trp-123",
+      status: "IN_PROGRESS",
+      expectedQty: 10,
+      podDocuments: [{ id: "pod-1" }],
+    });
+
+    await service.completeStop("trp-123", "stop-1", { version: 0, deliveredQty: 8 }, { sub: "usr-123", role: "ADMIN" });
+
+    expect(tripStopUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "stop-1" },
+        data: expect.objectContaining({
+          status: "DELIVERED",
+          deliveredQty: 8,
+          qtyMismatchFlag: true,
+        }),
+      }),
+    );
+  });
+
+  it("22. completeStop() sets status DELIVERED and does NOT set flag when qty matches", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, status: "DELIVERY_IN_PROGRESS", version: 0 });
+    tripStopFindFirst.mockResolvedValue({
+      id: "stop-1",
+      tripId: "trp-123",
+      status: "IN_PROGRESS",
+      expectedQty: 10,
+      podDocuments: [{ id: "pod-1" }],
+    });
+
+    await service.completeStop("trp-123", "stop-1", { version: 0, deliveredQty: 10 }, { sub: "usr-123", role: "ADMIN" });
+
+    expect(tripStopUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "stop-1" },
+        data: expect.objectContaining({
+          status: "DELIVERED",
+          deliveredQty: 10,
+          qtyMismatchFlag: false,
+        }),
+      }),
+    );
+  });
+
+  it("23. recordCollection() rejects when collection already exists for stop", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, status: "DELIVERY_IN_PROGRESS" });
+    tripStopFindFirst.mockResolvedValue({ id: "stop-1", tripId: "trp-123" });
+    collectionFindFirst.mockResolvedValue({ id: "col-1", tripStopId: "stop-1" });
+
+    await expect(
+      service.recordCollection(
+        "trp-123",
+        { tripStopId: "stop-1", actualAmount: 500, mode: "CASH" as any },
+        { sub: "usr-123", role: "ADMIN" },
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("24. recordCollection() rejects when trip status is READY_FOR_BILLING", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, status: "READY_FOR_BILLING" });
+
+    await expect(
+      service.recordCollection(
+        "trp-123",
+        { tripStopId: "stop-1", actualAmount: 500, mode: "CASH" as any },
+        { sub: "usr-123", role: "ADMIN" },
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("25. recordExpense() rejects when trip status is READY_FOR_BILLING", async () => {
+    tripFindFirst.mockResolvedValue({ ...mockTrip, status: "READY_FOR_BILLING" });
+
+    await expect(
+      service.recordExpense(
+        "trp-123",
+        { type: "TOLL" as any, amount: 200 },
+        { sub: "usr-123", role: "ADMIN" },
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("26. getSummary() returns correct variance (actual - expected)", async () => {
+    tripFindFirst.mockResolvedValue({
+      ...mockTrip,
+      tripNumber: "TRP-202610-0001",
+      status: "DELIVERED",
+      odometerStart: 1000,
+      odometerEnd: 1150,
+      tripStops: [
+        { id: "s1", status: "DELIVERED", expectedCollection: 5000, collection: { actualAmount: 4800 } },
+        { id: "s2", status: "DELIVERED", expectedCollection: 3000, collection: { actualAmount: 3000 } },
+      ],
+      tripExpenses: [
+        { id: "e1", amount: 400 },
+        { id: "e2", amount: 250 },
+      ],
+    });
+
+    const summary = await service.getSummary("trp-123");
+
+    expect(summary.expectedCollection).toBe(8000);
+    expect(summary.actualCollection).toBe(7800);
+    expect(summary.variance).toBe(-200);
+    expect(summary.totalExpenses).toBe(650);
+    expect(summary.stopsTotal).toBe(2);
+    expect(summary.stopsDelivered).toBe(2);
+    expect(summary.actualKm).toBe(150);
   });
 });

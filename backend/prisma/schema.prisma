@@ -380,7 +380,7 @@ model Trip {
   deletedAt         DateTime?  @db.Timestamptz(6)
 
   tripStops    TripStop[]
-  expenses     TripExpense[]
+  tripExpenses TripExpense[]
   eodTally     EodTally?
   auditReviews AuditReview[]
   invoiceLine  InvoiceLine?
@@ -405,6 +405,7 @@ model TripStop {
   collectionType CollectionMode @default(COD)
   expectedCollection Int        @default(0)
   status         TripStopStatus @default(PENDING)
+  qtyMismatchFlag Boolean       @default(false)
   createdAt      DateTime       @default(now()) @db.Timestamptz(6)
 
   collection   Collection?

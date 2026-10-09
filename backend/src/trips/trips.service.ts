@@ -16,6 +16,9 @@ import { TripActionDto } from "./dto/trip-action.dto";
 import { EndTripDto } from "./dto/end-trip.dto";
 import { ArriveStopDto } from "./dto/arrive-stop.dto";
 import { AuditTripDto } from "./dto/audit-trip.dto";
+import { CompleteStopDto } from "./dto/complete-stop.dto";
+import { RecordCollectionDto } from "./dto/record-collection.dto";
+import { RecordExpenseDto } from "./dto/record-expense.dto";
 
 @Injectable()
 export class TripsService {
@@ -450,5 +453,162 @@ export class TripsService {
       },
       { timeout: 20000, maxWait: 10000 },
     );
+  }
+
+  async completeStop(id: string, stopId: string, dto: CompleteStopDto, user: { sub: string; role: string }) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const trip = await this.loadTripForAction(tx, id);
+        this.assertVersion(trip, dto.version);
+        this.assertActorCanActOnTrip(trip, user);
+
+        if (trip.status !== "IN_PROGRESS" && trip.status !== "DELIVERY_IN_PROGRESS") {
+          throw new BadRequestException(`Cannot complete stop while trip is ${trip.status}.`);
+        }
+
+        const stop = await tx.tripStop.findFirst({
+          where: { id: stopId, tripId: id },
+          include: { podDocuments: true },
+        });
+        if (!stop) throw new NotFoundException("Trip stop not found.");
+        if (stop.status === "DELIVERED") {
+          throw new BadRequestException("Stop is already completed.");
+        }
+        if (stop.podDocuments.length === 0) {
+          throw new BadRequestException("A POD document is required before completing the stop.");
+        }
+
+        const deliveredQty = dto.deliveredQty ?? stop.expectedQty ?? null;
+        const qtyMismatch =
+          stop.expectedQty != null && deliveredQty != null && deliveredQty !== stop.expectedQty;
+
+        await tx.tripStop.update({
+          where: { id: stopId },
+          data: {
+            status: "DELIVERED",
+            deliveredQty,
+            qtyMismatchFlag: qtyMismatch,
+          },
+        });
+
+        await tx.trip.update({
+          where: { id },
+          data: { version: { increment: 1 } },
+        });
+
+        return tx.trip.findUniqueOrThrow({
+          where: { id },
+          include: { tripStops: { orderBy: { sequence: "asc" }, include: { podDocuments: true, collection: true } } },
+        });
+      },
+      { timeout: 20000, maxWait: 10000 },
+    );
+  }
+
+  async recordCollection(id: string, dto: RecordCollectionDto, user: { sub: string; role: string }) {
+    const { organizationId } = requireTenant();
+
+    const trip = await this.prisma.trip.findFirst({ where: { id, deletedAt: null } });
+    if (!trip) throw new NotFoundException("Trip not found.");
+    if (trip.status === "READY_FOR_BILLING") {
+      throw new BadRequestException("Cannot record collection on a closed trip.");
+    }
+
+    const stop = await this.prisma.tripStop.findFirst({ where: { id: dto.tripStopId, tripId: id } });
+    if (!stop) throw new NotFoundException("Trip stop not found.");
+
+    const existing = await this.prisma.collection.findFirst({ where: { tripStopId: dto.tripStopId } });
+    if (existing) {
+      throw new BadRequestException("A collection is already recorded for this stop. Use update instead.");
+    }
+
+    return this.prisma.collection.create({
+      data: {
+        organizationId,
+        tripStopId: dto.tripStopId,
+        actualAmount: dto.actualAmount,
+        mode: dto.mode,
+        referenceId: dto.referenceId?.trim() || null,
+        notes: dto.notes?.trim() || null,
+        recordedById: user.sub,
+      },
+    });
+  }
+
+  async listCollections(id: string) {
+    const trip = await this.prisma.trip.findFirst({ where: { id, deletedAt: null } });
+    if (!trip) throw new NotFoundException("Trip not found.");
+
+    return this.prisma.collection.findMany({
+      where: { tripStop: { tripId: id } },
+      include: { tripStop: { select: { id: true, sequence: true, name: true, expectedCollection: true } } },
+      orderBy: { collectedAt: "desc" },
+    });
+  }
+
+  async recordExpense(id: string, dto: RecordExpenseDto, user: { sub: string; role: string }) {
+    const { organizationId } = requireTenant();
+
+    const trip = await this.prisma.trip.findFirst({ where: { id, deletedAt: null } });
+    if (!trip) throw new NotFoundException("Trip not found.");
+    if (trip.status === "READY_FOR_BILLING") {
+      throw new BadRequestException("Cannot add expense to a closed trip.");
+    }
+
+    return this.prisma.tripExpense.create({
+      data: {
+        organizationId,
+        tripId: id,
+        type: dto.type,
+        amount: dto.amount,
+        receiptRef: dto.receiptRef?.trim() || null,
+        note: dto.note?.trim() || null,
+      },
+    });
+  }
+
+  async listExpenses(id: string) {
+    const trip = await this.prisma.trip.findFirst({ where: { id, deletedAt: null } });
+    if (!trip) throw new NotFoundException("Trip not found.");
+
+    return this.prisma.tripExpense.findMany({
+      where: { tripId: id },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  async getSummary(id: string) {
+    const trip = await this.prisma.trip.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        tripStops: { include: { collection: true } },
+        tripExpenses: true,
+      },
+    });
+    if (!trip) throw new NotFoundException("Trip not found.");
+
+    const expectedCollection = trip.tripStops.reduce((s, st) => s + (st.expectedCollection ?? 0), 0);
+    const actualCollection = trip.tripStops.reduce((s, st) => s + (st.collection?.actualAmount ?? 0), 0);
+    const totalExpenses = trip.tripExpenses.reduce((s, e) => s + e.amount, 0);
+    const stopsTotal = trip.tripStops.length;
+    const stopsDelivered = trip.tripStops.filter((s) => s.status === "DELIVERED").length;
+
+    return {
+      tripId: trip.id,
+      tripNumber: trip.tripNumber,
+      status: trip.status,
+      stopsTotal,
+      stopsDelivered,
+      expectedCollection,
+      actualCollection,
+      variance: actualCollection - expectedCollection,
+      totalExpenses,
+      odometerStart: trip.odometerStart,
+      odometerEnd: trip.odometerEnd,
+      actualKm:
+        trip.odometerStart != null && trip.odometerEnd != null
+          ? trip.odometerEnd - trip.odometerStart
+          : null,
+    };
   }
 }

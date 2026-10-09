@@ -24,6 +24,9 @@ import { TripActionDto } from "./dto/trip-action.dto";
 import { EndTripDto } from "./dto/end-trip.dto";
 import { ArriveStopDto } from "./dto/arrive-stop.dto";
 import { AuditTripDto } from "./dto/audit-trip.dto";
+import { CompleteStopDto } from "./dto/complete-stop.dto";
+import { RecordCollectionDto } from "./dto/record-collection.dto";
+import { RecordExpenseDto } from "./dto/record-expense.dto";
 import { TripsService } from "./trips.service";
 
 @ApiTags("trips")
@@ -38,6 +41,48 @@ export class TripsController {
   @ApiOperation({ summary: "List trips" })
   list(@Query() query: ListTripsQueryDto) {
     return this.tripsService.list(query);
+  }
+
+  @Post(":id/stops/:stopId/complete")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.DRIVER)
+  @ApiOperation({ summary: "Mark a stop delivered (requires POD)" })
+  completeStop(@Param("id") id: string, @Param("stopId") stopId: string, @Body() dto: CompleteStopDto, @Req() req: any) {
+    return this.tripsService.completeStop(id, stopId, dto, req.user);
+  }
+
+  @Post(":id/collections")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.DRIVER)
+  @ApiOperation({ summary: "Record a collection for a stop" })
+  recordCollection(@Param("id") id: string, @Body() dto: RecordCollectionDto, @Req() req: any) {
+    return this.tripsService.recordCollection(id, dto, req.user);
+  }
+
+  @Get(":id/collections")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.AUDITOR, Role.ACCOUNTS)
+  @ApiOperation({ summary: "List collections for a trip" })
+  listCollections(@Param("id") id: string) {
+    return this.tripsService.listCollections(id);
+  }
+
+  @Post(":id/expenses")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.DRIVER)
+  @ApiOperation({ summary: "Record an expense for a trip" })
+  recordExpense(@Param("id") id: string, @Body() dto: RecordExpenseDto, @Req() req: any) {
+    return this.tripsService.recordExpense(id, dto, req.user);
+  }
+
+  @Get(":id/expenses")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.AUDITOR, Role.ACCOUNTS)
+  @ApiOperation({ summary: "List expenses for a trip" })
+  listExpenses(@Param("id") id: string) {
+    return this.tripsService.listExpenses(id);
+  }
+
+  @Get(":id/summary")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.AUDITOR, Role.ACCOUNTS)
+  @ApiOperation({ summary: "Aggregated trip summary" })
+  summary(@Param("id") id: string) {
+    return this.tripsService.getSummary(id);
   }
 
   @Get(":id")
