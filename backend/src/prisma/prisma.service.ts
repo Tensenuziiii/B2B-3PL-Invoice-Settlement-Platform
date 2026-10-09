@@ -37,7 +37,9 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get driver()            { return this.c.driver; }
   get trip()              { return this.c.trip; }
   get tripStop()          { return this.c.tripStop; }
-  get pod()               { return this.c.pod; }
+  get pod()               { return (this.c as any).pod; }
+  get podDocument()       { return this.c.podDocument; }
+  get collection()        { return this.c.collection; }
   get tripExpense()       { return this.c.tripExpense; }
   get eodTally()          { return this.c.eodTally; }
   get auditReview()       { return this.c.auditReview; }
@@ -54,12 +56,15 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get $executeRaw()    { return this.c.$executeRaw.bind(this.c); }
   get $executeRawUnsafe(){ return this.c.$executeRawUnsafe.bind(this.c); }
 
-  $transaction<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+  $transaction<T>(
+    fn: (tx: Prisma.TransactionClient) => Promise<T>,
+    options?: { maxWait?: number; timeout?: number; isolationLevel?: Prisma.TransactionIsolationLevel },
+  ): Promise<T>;
   $transaction<T extends Prisma.PrismaPromise<any>[]>(
     queries: [...T],
   ): Promise<{ [K in keyof T]: Awaited<T[K]> }>;
-  $transaction(input: any): any {
-    return (this.c as any).$transaction(input);
+  $transaction(input: any, options?: any): any {
+    return (this.c as any).$transaction(input, options);
   }
 
   async onModuleInit()    { await this.c.$connect(); }

@@ -39,6 +39,20 @@ enum TripStatus {
   READY_FOR_BILLING
 }
 
+enum TripStopStatus {
+  PENDING
+  IN_PROGRESS
+  DELIVERED
+  FAILED
+}
+
+enum PodDocumentType {
+  PHOTO
+  SIGNATURE
+  LR
+  OTHER
+}
+
 // Spec §29
 enum InvoiceStatus {
   DRAFT
@@ -128,7 +142,8 @@ model Organization {
   rateCardItems     RateCardItem[]
   trips             Trip[]
   tripStops         TripStop[]
-  pods              Pod[]
+  podDocuments      PodDocument[]
+  collections       Collection[]
   tripExpenses      TripExpense[]
   eodTally          EodTally[]
   auditReviews      AuditReview[]
@@ -329,80 +344,103 @@ model Driver {
 // ============================================================
 
 model Trip {
-  id              String     @id @default(uuid()) @db.Uuid
-  organizationId  String     @db.Uuid
-  organization    Organization @relation(fields: [organizationId], references: [id])
-  tripNumber      String
-  lrNumber        String?
-  status          TripStatus @default(ASSIGNED)
-  version         Int        @default(0)
-  clientId        String?    @db.Uuid
-  client          Client?    @relation(fields: [clientId], references: [id])
-  driverId        String?    @db.Uuid
-  driver          Driver?    @relation(fields: [driverId], references: [id])
-  vehicleId       String?    @db.Uuid
-  vehicle         Vehicle?   @relation(fields: [vehicleId], references: [id])
-  origin          String?
-  destination     String?
-  eta             DateTime?  @db.Timestamptz(6)
-  odometerStart   Int?
-  odometerEnd     Int?
-  delayMinutes    Int        @default(0)
-  delayReason     String?
-  createdAt       DateTime   @default(now()) @db.Timestamptz(6)
-  updatedAt       DateTime   @updatedAt @db.Timestamptz(6)
-  deletedAt       DateTime?  @db.Timestamptz(6)
+  id                String     @id @default(uuid()) @db.Uuid
+  organizationId    String     @db.Uuid
+  organization      Organization @relation(fields: [organizationId], references: [id])
+  tripNumber        String
+  lrNumber          String?
+  status            TripStatus @default(ASSIGNED)
+  version           Int        @default(0)
+  clientId          String?    @db.Uuid
+  client            Client?    @relation(fields: [clientId], references: [id])
+  vendorId          String?    @db.Uuid
+  vendor            Vendor?    @relation(fields: [vendorId], references: [id])
+  routeId           String?    @db.Uuid
+  route             Route?     @relation(fields: [routeId], references: [id])
+  driverId          String?    @db.Uuid
+  driver            Driver?    @relation(fields: [driverId], references: [id])
+  vehicleId         String?    @db.Uuid
+  vehicle           Vehicle?   @relation(fields: [vehicleId], references: [id])
+  origin            String?
+  destination       String?
+  eta               DateTime?  @db.Timestamptz(6)
+  odometerStart     Int?
+  odometerEnd       Int?
+  delayMinutes      Int        @default(0)
+  delayReason       String?
+  assignedAt        DateTime?  @db.Timestamptz(6)
+  startedAt         DateTime?  @db.Timestamptz(6)
+  deliveredAt       DateTime?  @db.Timestamptz(6)
+  closedAt          DateTime?  @db.Timestamptz(6)
+  auditRequestedAt  DateTime?  @db.Timestamptz(6)
+  auditedAt         DateTime?  @db.Timestamptz(6)
+  readyForBillingAt DateTime?  @db.Timestamptz(6)
+  createdAt         DateTime   @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime   @updatedAt @db.Timestamptz(6)
+  deletedAt         DateTime?  @db.Timestamptz(6)
 
-  tripStops   TripStop[]
-  pod         Pod?
-  expenses    TripExpense[]
-  eodTally    EodTally?
+  tripStops    TripStop[]
+  expenses     TripExpense[]
+  eodTally     EodTally?
   auditReviews AuditReview[]
-  invoiceLine InvoiceLine?
+  invoiceLine  InvoiceLine?
 
   @@unique([organizationId, tripNumber])
   @@index([organizationId])
   @@index([status])
+  @@index([organizationId, driverId, status])
 }
 
 model TripStop {
-  id             String   @id @default(uuid()) @db.Uuid
-  organizationId String   @db.Uuid
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  tripId         String   @db.Uuid
-  trip           Trip     @relation(fields: [tripId], references: [id])
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  tripId         String         @db.Uuid
+  trip           Trip           @relation(fields: [tripId], references: [id])
   sequence       Int
   name           String?
   address        String?
   expectedQty    Int?
   deliveredQty   Int?
-  collectionType CollectionMode? @default(COD)
-  expectedCollection Int  @default(0)
-  status         String   @default("PENDING")
-  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+  collectionType CollectionMode @default(COD)
+  expectedCollection Int        @default(0)
+  status         TripStopStatus @default(PENDING)
+  createdAt      DateTime       @default(now()) @db.Timestamptz(6)
+
+  collection   Collection?
+  podDocuments PodDocument[]
 
   @@index([organizationId])
   @@index([tripId, sequence])
 }
 
-model Pod {
-  id             String   @id @default(uuid()) @db.Uuid
-  organizationId String   @db.Uuid
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  tripId         String   @unique @db.Uuid
-  trip           Trip     @relation(fields: [tripId], references: [id])
-  photoKey       String?
-  signatureKey   String?
-  signatoryName  String?
-  dockGpsLat     Float?
-  dockGpsLng     Float?
-  gateInTimestamp DateTime? @db.Timestamptz(6)
-  stampVerified  Boolean  @default(false)
-  authHash       String?
-  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+model PodDocument {
+  id                String          @id @default(uuid()) @db.Uuid
+  organizationId    String          @db.Uuid
+  organization      Organization    @relation(fields: [organizationId], references: [id])
+  tripStopId        String          @db.Uuid
+  tripStop          TripStop        @relation(fields: [tripStopId], references: [id], onDelete: Cascade)
+  documentType      PodDocumentType
+  s3Key             String
+  contentType       String
+  sizeBytes         Int
+  sha256            String?
+  signatoryName     String?
+  dockGpsLat        Float?
+  dockGpsLng        Float?
+  gateInTimestamp   DateTime?       @db.Timestamptz(6)
+  stampVerified     Boolean         @default(false)
+  authHash          String?
+  uploadedById      String?         @db.Uuid
+  ocrResult         Json?
+  validationResult  Json?
+  createdAt         DateTime        @default(now()) @db.Timestamptz(6)
 
   @@index([organizationId])
+  @@index([tripStopId])
+  @@index([organizationId, documentType])
 }
+
 
 model TripExpense {
   id             String      @id @default(uuid()) @db.Uuid
@@ -556,6 +594,7 @@ model Vendor {
   deletedAt        DateTime? @db.Timestamptz(6)
 
   rateCards RateCard[]
+  trips     Trip[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -577,6 +616,7 @@ model Route {
   deletedAt             DateTime? @db.Timestamptz(6)
 
   rateCardItems RateCardItem[]
+  trips         Trip[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -628,6 +668,23 @@ model RateCardItem {
   @@index([organizationId])
   @@index([rateCardId])
   @@index([organizationId, rateType])
+}
+
+model Collection {
+  id                String       @id @default(uuid()) @db.Uuid
+  organizationId    String       @db.Uuid
+  organization      Organization @relation(fields: [organizationId], references: [id])
+  tripStopId        String       @unique @db.Uuid
+  tripStop          TripStop     @relation(fields: [tripStopId], references: [id])
+  actualAmount      Int
+  mode              CollectionMode
+  referenceId       String?
+  collectedAt       DateTime     @default(now()) @db.Timestamptz(6)
+  recordedById      String?      @db.Uuid
+  notes             String?
+  createdAt         DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
 }
 
 model AuditLog {
