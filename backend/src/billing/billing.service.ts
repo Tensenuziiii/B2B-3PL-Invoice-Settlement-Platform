@@ -1,6 +1,10 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { Prisma, Trip, TripStop } from "@prisma/client";
+import { PrismaService } from "../prisma/prisma.service";
 import { RateCardsService } from "../rate-cards/rate-cards.service";
+import { InvoiceNumberService } from "./invoice-number.service";
+import { GenerateInvoiceDto } from "./dto/generate-invoice.dto";
+import { requireTenant } from "../core/tenant/tenant.context";
 
 export type ChargeSnapshot = {
   rateCardId: string;
@@ -32,7 +36,11 @@ const RATE_TYPE_PRIORITY = ["FIXED_TRIP", "PER_DELIVERY", "PER_KM"] as const;
 
 @Injectable()
 export class BillingService {
-  constructor(private readonly rateCards: RateCardsService) {}
+  constructor(
+    private readonly rateCards: RateCardsService,
+    private readonly prisma: PrismaService,
+    private readonly invoiceNumbers: InvoiceNumberService,
+  ) {}
 
   async calculateTripCharge(
     trip: Trip & { tripStops: TripStop[] },
@@ -153,5 +161,126 @@ export class BillingService {
       totalAmountPaise,
       snapshot,
     };
+  }
+
+  async generateInvoice(
+    dto: GenerateInvoiceDto,
+    generatedById: string,
+  ): Promise<{ id: string; invoiceNumber: string; status: string; totalPaise: number }> {
+    const { organizationId } = requireTenant();
+
+    if (dto.tripIds.length !== new Set(dto.tripIds).size) {
+      throw new BadRequestException("Duplicate tripIds in request.");
+    }
+
+    const issueDate = dto.issueDate ? new Date(dto.issueDate) : new Date();
+    const dueDate = dto.dueDate ? new Date(dto.dueDate) : null;
+    const periodStart = new Date(dto.periodStart);
+    const periodEnd = new Date(dto.periodEnd);
+    const gstRate = dto.gstRate ?? DEFAULT_GST_RATE;
+
+    if (periodEnd < periodStart) {
+      throw new BadRequestException("periodEnd must be on or after periodStart.");
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Load trips with stops
+      const trips = await tx.trip.findMany({
+        where: {
+          id: { in: dto.tripIds },
+          deletedAt: null,
+        },
+        include: { tripStops: { orderBy: { sequence: "asc" } } },
+      });
+
+      if (trips.length !== dto.tripIds.length) {
+        const found = new Set(trips.map((t) => t.id));
+        const missing = dto.tripIds.filter((id) => !found.has(id));
+        throw new BadRequestException(`Trips not found: ${missing.join(", ")}`);
+      }
+
+      // 2. Validate every trip
+      for (const trip of trips) {
+        if (trip.status !== "READY_FOR_BILLING") {
+          throw new BadRequestException(
+            `Trip ${trip.tripNumber} is in status ${trip.status}, expected READY_FOR_BILLING.`,
+          );
+        }
+        if (trip.clientId !== dto.clientId) {
+          throw new BadRequestException(
+            `Trip ${trip.tripNumber} belongs to a different client.`,
+          );
+        }
+      }
+
+      // 3. Verify no trip is already on another invoice
+      const existingLines = await tx.invoiceLine.findMany({
+        where: { tripId: { in: dto.tripIds } },
+        select: { tripId: true, invoice: { select: { invoiceNumber: true, status: true } } },
+      });
+      if (existingLines.length > 0) {
+        const used = existingLines
+          .map((l) => `${l.tripId} (on ${l.invoice.invoiceNumber}/${l.invoice.status})`)
+          .join(", ");
+        throw new BadRequestException(`Trips already billed: ${used}`);
+      }
+
+      // 4. Calculate charges per trip (this uses RateCardsService which needs to be injected)
+      const chargeResults = await Promise.all(
+        trips.map((trip) =>
+          this.calculateTripCharge(trip as any, issueDate, gstRate),
+        ),
+      );
+
+      // 5. Sum totals
+      const subtotal = chargeResults.reduce((s, r) => s + r.lineAmountPaise, 0);
+      const gstAmount = chargeResults.reduce((s, r) => s + r.gstAmountPaise, 0);
+      const total = chargeResults.reduce((s, r) => s + r.totalAmountPaise, 0);
+
+      // 6. Generate invoice number (atomic counter)
+      const invoiceNumber = await this.invoiceNumbers.nextInvoiceNumber(
+        tx,
+        organizationId,
+        issueDate,
+      );
+
+      // 7. Create Invoice header
+      const invoice = await tx.invoice.create({
+        data: {
+          organizationId,
+          invoiceNumber,
+          status: "DRAFT",
+          clientId: dto.clientId,
+          issueDate,
+          dueDate,
+          periodStart,
+          periodEnd,
+          subtotal,
+          gstRate,
+          gstAmount,
+          total,
+        },
+      });
+
+      // 8. Create InvoiceLine rows with snapshots
+      await tx.invoiceLine.createMany({
+        data: chargeResults.map((r, i) => ({
+          organizationId,
+          invoiceId: invoice.id,
+          tripId: trips[i].id,
+          lineAmount: r.lineAmountPaise,
+          gstAmount: r.gstAmountPaise,
+          totalAmount: r.totalAmountPaise,
+          snapshot: r.snapshot as any,
+        })),
+      });
+
+      return {
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        status: invoice.status,
+        totalPaise: invoice.total,
+      };
+    });
   }
 }

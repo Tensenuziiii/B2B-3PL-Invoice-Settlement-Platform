@@ -1,10 +1,17 @@
 import { BadRequestException } from "@nestjs/common";
 import { BillingService } from "./billing.service";
 import { RateCardsService } from "../rate-cards/rate-cards.service";
+import { PrismaService } from "../prisma/prisma.service";
+import { InvoiceNumberService } from "./invoice-number.service";
+import { tenantStorage } from "../core/tenant/tenant.context";
+import { GenerateInvoiceDto } from "./dto/generate-invoice.dto";
 
 describe("BillingService", () => {
   let service: BillingService;
   let mockRateCardsService: { resolve: jest.Mock };
+  let mockPrismaService: any;
+  let mockInvoiceNumbersService: { nextInvoiceNumber: jest.Mock };
+  let mockTx: any;
 
   const createMockTrip = (overrides?: Record<string, any>): any => ({
     id: "trip-123",
@@ -73,10 +80,48 @@ describe("BillingService", () => {
   });
 
   beforeEach(() => {
+    tenantStorage.enterWith({ organizationId: "org-123", userId: "usr-123" });
+
     mockRateCardsService = {
       resolve: jest.fn(),
     };
-    service = new BillingService(mockRateCardsService as unknown as RateCardsService);
+    mockTx = {
+      trip: {
+        findMany: jest.fn(),
+      },
+      invoiceLine: {
+        findMany: jest.fn().mockResolvedValue([]),
+        createMany: jest.fn().mockResolvedValue({ count: 2 }),
+      },
+      invoice: {
+        create: jest.fn().mockImplementation((args) => ({
+          id: "inv-123",
+          invoiceNumber: args.data.invoiceNumber,
+          status: args.data.status,
+          total: args.data.total,
+        })),
+      },
+      counter: {
+        findFirst: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+      },
+    };
+    mockPrismaService = {
+      $transaction: jest.fn(async (cb) => cb(mockTx)),
+    };
+    mockInvoiceNumbersService = {
+      nextInvoiceNumber: jest.fn().mockResolvedValue("INV-202610-0001"),
+    };
+    service = new BillingService(
+      mockRateCardsService as unknown as RateCardsService,
+      mockPrismaService as unknown as PrismaService,
+      mockInvoiceNumbersService as unknown as InvoiceNumberService,
+    );
+  });
+
+  afterEach(() => {
+    tenantStorage.disable();
   });
 
   it("1. calculateTripCharge() throws when trip has no clientId", async () => {
@@ -265,5 +310,191 @@ describe("BillingService", () => {
     expect(snapshot.resolvedAt).toBeDefined();
     expect(typeof snapshot.resolvedAt).toBe("string");
     expect(snapshot.serviceDate).toBe(onDate.toISOString());
+  });
+
+  it("11. generateInvoice() throws when tripIds has duplicates", async () => {
+    const dto: GenerateInvoiceDto = {
+      clientId: "cli-123",
+      tripIds: ["trip-1", "trip-1"],
+      periodStart: "2026-10-01T00:00:00.000Z",
+      periodEnd: "2026-10-10T23:59:59.000Z",
+    };
+    await expect(service.generateInvoice(dto, "usr-123")).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
+  it("12. generateInvoice() throws when periodEnd < periodStart", async () => {
+    const dto: GenerateInvoiceDto = {
+      clientId: "cli-123",
+      tripIds: ["trip-1"],
+      periodStart: "2026-10-10T00:00:00.000Z",
+      periodEnd: "2026-10-01T00:00:00.000Z",
+    };
+    await expect(service.generateInvoice(dto, "usr-123")).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
+  it("13. generateInvoice() throws when a trip is not found", async () => {
+    mockTx.trip.findMany.mockResolvedValueOnce([
+      createMockTrip({ id: "trip-1", clientId: "cli-123", status: "READY_FOR_BILLING" }),
+    ]);
+
+    const dto: GenerateInvoiceDto = {
+      clientId: "cli-123",
+      tripIds: ["trip-1", "trip-2"],
+      periodStart: "2026-10-01T00:00:00.000Z",
+      periodEnd: "2026-10-10T23:59:59.000Z",
+    };
+
+    await expect(service.generateInvoice(dto, "usr-123")).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
+  it("14. generateInvoice() throws when a trip is not READY_FOR_BILLING", async () => {
+    mockTx.trip.findMany.mockResolvedValueOnce([
+      createMockTrip({ id: "trip-1", clientId: "cli-123", status: "DELIVERED" }),
+    ]);
+
+    const dto: GenerateInvoiceDto = {
+      clientId: "cli-123",
+      tripIds: ["trip-1"],
+      periodStart: "2026-10-01T00:00:00.000Z",
+      periodEnd: "2026-10-10T23:59:59.000Z",
+    };
+
+    await expect(service.generateInvoice(dto, "usr-123")).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
+  it("15. generateInvoice() throws when a trip belongs to a different client", async () => {
+    mockTx.trip.findMany.mockResolvedValueOnce([
+      createMockTrip({ id: "trip-1", clientId: "cli-other", status: "READY_FOR_BILLING" }),
+    ]);
+
+    const dto: GenerateInvoiceDto = {
+      clientId: "cli-123",
+      tripIds: ["trip-1"],
+      periodStart: "2026-10-01T00:00:00.000Z",
+      periodEnd: "2026-10-10T23:59:59.000Z",
+    };
+
+    await expect(service.generateInvoice(dto, "usr-123")).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
+  it("16. generateInvoice() creates invoice + line items with correct totals", async () => {
+    const trip1 = createMockTrip({
+      id: "trip-1",
+      tripNumber: "TRP-202610-0001",
+      clientId: "cli-123",
+      status: "READY_FOR_BILLING",
+      odometerStart: 100,
+      odometerEnd: 600,
+    });
+    const trip2 = createMockTrip({
+      id: "trip-2",
+      tripNumber: "TRP-202610-0002",
+      clientId: "cli-123",
+      status: "READY_FOR_BILLING",
+      odometerStart: 200,
+      odometerEnd: 700,
+    });
+
+    mockTx.trip.findMany.mockResolvedValueOnce([trip1, trip2]);
+    mockTx.invoiceLine.findMany.mockResolvedValueOnce([]);
+
+    // For trip 1: 100,000 paise (FIXED_TRIP)
+    // For trip 2: 150,000 paise (FIXED_TRIP)
+    mockRateCardsService.resolve
+      .mockResolvedValueOnce({
+        rateCardId: "rc-1",
+        rateCardName: "Fixed 1",
+        rateCardItemId: "rci-1",
+        rateType: "FIXED_TRIP",
+        rate: 100000,
+        score: 1,
+      })
+      .mockResolvedValueOnce({
+        rateCardId: "rc-2",
+        rateCardName: "Fixed 2",
+        rateCardItemId: "rci-2",
+        rateType: "FIXED_TRIP",
+        rate: 150000,
+        score: 1,
+      });
+
+    mockInvoiceNumbersService.nextInvoiceNumber.mockResolvedValueOnce("INV-202610-0001");
+
+    const dto: GenerateInvoiceDto = {
+      clientId: "cli-123",
+      tripIds: ["trip-1", "trip-2"],
+      periodStart: "2026-10-01T00:00:00.000Z",
+      periodEnd: "2026-10-10T23:59:59.000Z",
+      issueDate: "2026-10-10T10:00:00.000Z",
+    };
+
+    const result = await service.generateInvoice(dto, "usr-123");
+
+    expect(mockTx.invoice.create).toHaveBeenCalledWith({
+      data: {
+        organizationId: "org-123",
+        invoiceNumber: "INV-202610-0001",
+        status: "DRAFT",
+        clientId: "cli-123",
+        issueDate: new Date("2026-10-10T10:00:00.000Z"),
+        dueDate: null,
+        periodStart: new Date("2026-10-01T00:00:00.000Z"),
+        periodEnd: new Date("2026-10-10T23:59:59.000Z"),
+        subtotal: 250000,
+        gstRate: 18,
+        gstAmount: 45000,
+        total: 295000,
+      },
+    });
+
+    expect(mockTx.invoiceLine.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          organizationId: "org-123",
+          invoiceId: "inv-123",
+          tripId: "trip-1",
+          lineAmount: 100000,
+          gstAmount: 18000,
+          totalAmount: 118000,
+          snapshot: expect.objectContaining({
+            rateCardItemId: "rci-1",
+            rateType: "FIXED_TRIP",
+            rateAmountPaise: 100000,
+            quantity: 1,
+          }),
+        },
+        {
+          organizationId: "org-123",
+          invoiceId: "inv-123",
+          tripId: "trip-2",
+          lineAmount: 150000,
+          gstAmount: 27000,
+          totalAmount: 177000,
+          snapshot: expect.objectContaining({
+            rateCardItemId: "rci-2",
+            rateType: "FIXED_TRIP",
+            rateAmountPaise: 150000,
+            quantity: 1,
+          }),
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      id: "inv-123",
+      invoiceNumber: "INV-202610-0001",
+      status: "DRAFT",
+      totalPaise: 295000,
+    });
   });
 });
