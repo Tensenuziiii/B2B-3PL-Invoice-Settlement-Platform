@@ -49,8 +49,6 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get dispute()           { return this.c.dispute; }
   get message()           { return this.c.message; }
   get idempotencyKey()    { return this.c.idempotencyKey; }
-  get driverAdvance()     { return (this.c as any).driverAdvance; }
-  get hub()               { return (this.c as any).hub; }
   get systemAlert()       { return (this.c as any).systemAlert; }
 
   get $queryRaw()      { return this.c.$queryRaw.bind(this.c); }

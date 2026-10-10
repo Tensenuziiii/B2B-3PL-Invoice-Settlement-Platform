@@ -23,6 +23,7 @@ type TokenPayload = {
   hubName: string | null;
   orgId: string;
   permissions: string[];
+  clientId?: string | null;
 };
 
 export type LoginRequestMetadata = {
@@ -154,7 +155,11 @@ export class AuthService {
       hubName: user.hubName,
       orgId: user.organizationId,
       permissions: permissionCodes,
+      clientId: user.clientId ?? null,
     };
+    if (user.clientId === undefined) {
+      delete payload.clientId;
+    }
 
     const session = await this.createSession(payload, user, metadata);
 
@@ -255,6 +260,7 @@ export class AuthService {
         hubName: storedToken.user.hubName,
         orgId: storedToken.user.organizationId,
         permissions: permissionCodes,
+        clientId: storedToken.user.clientId ?? null,
       };
 
       return {
