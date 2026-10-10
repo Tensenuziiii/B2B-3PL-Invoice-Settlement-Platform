@@ -515,6 +515,10 @@ model Invoice {
   total          Int           @default(0)
   createdAt      DateTime      @default(now()) @db.Timestamptz(6)
   updatedAt      DateTime      @updatedAt @db.Timestamptz(6)
+  submittedAt    DateTime?     @db.Timestamptz(6)
+  approvedAt     DateTime?     @db.Timestamptz(6)
+  rejectedAt     DateTime?     @db.Timestamptz(6)
+  cancelledAt    DateTime?     @db.Timestamptz(6)
   deletedAt      DateTime?     @db.Timestamptz(6)
 
   lines    InvoiceLine[]
