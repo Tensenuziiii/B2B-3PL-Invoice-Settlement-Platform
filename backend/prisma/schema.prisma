@@ -111,6 +111,18 @@ enum CounterpartyType {
   VENDOR
 }
 
+enum DisputeStatus {
+  DISPUTED
+  UNDER_REVIEW
+  RESOLVED
+}
+
+enum DisputeResolution {
+  ACCEPTED
+  REJECTED
+  PARTIAL_ADJUSTMENT
+}
+
 // ============================================================
 // TENANT ROOT
 // ============================================================
@@ -150,6 +162,8 @@ model Organization {
   invoices          Invoice[]
   invoiceLines      InvoiceLine[]
   payments          Payment[]
+  disputes          Dispute[]
+  messages          Message[]
   notifications     Notification[]
 
   @@index([status])
@@ -437,6 +451,8 @@ model PodDocument {
   validationResult  Json?
   createdAt         DateTime        @default(now()) @db.Timestamptz(6)
 
+  disputes          Dispute[]
+
   @@index([organizationId])
   @@index([tripStopId])
   @@index([organizationId, documentType])
@@ -544,6 +560,8 @@ model InvoiceLine {
   snapshot       Json?
   createdAt      DateTime @default(now()) @db.Timestamptz(6)
 
+  dispute        Dispute?
+
   @@index([organizationId])
   @@index([invoiceId])
 }
@@ -562,6 +580,50 @@ model Payment {
 
   @@index([organizationId])
   @@index([invoiceId])
+}
+
+model Dispute {
+  id                String             @id @default(uuid()) @db.Uuid
+  organizationId    String             @db.Uuid
+  organization      Organization       @relation(fields: [organizationId], references: [id])
+  disputeNumber     String
+  invoiceLineId     String             @db.Uuid
+  invoiceLine       InvoiceLine        @relation(fields: [invoiceLineId], references: [id])
+  raisedById        String             @db.Uuid
+  reasonCode        String
+  comment           String
+  evidenceDocId     String?            @db.Uuid
+  evidenceDoc       PodDocument?       @relation(fields: [evidenceDocId], references: [id])
+  amountPaise       Int
+  status            DisputeStatus      @default(DISPUTED)
+  resolution        DisputeResolution?
+  resolvedById      String?            @db.Uuid
+  resolvedAt        DateTime?          @db.Timestamptz(6)
+  resolutionNotes   String?
+  version           Int                @default(0)
+  createdAt         DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @db.Timestamptz(6)
+
+  messages          Message[]
+
+  @@unique([organizationId, disputeNumber])
+  @@unique([invoiceLineId])   // one open dispute per line — enforced by unique constraint
+  @@index([organizationId])
+  @@index([organizationId, status])
+}
+
+model Message {
+  id              String       @id @default(uuid()) @db.Uuid
+  organizationId  String       @db.Uuid
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  disputeId       String       @db.Uuid
+  dispute         Dispute      @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  authorId        String       @db.Uuid
+  body            String
+  createdAt       DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([disputeId, createdAt])
 }
 
 // ============================================================

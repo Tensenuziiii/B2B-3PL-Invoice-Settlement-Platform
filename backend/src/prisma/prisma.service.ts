@@ -46,6 +46,8 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get invoice()           { return this.c.invoice; }
   get invoiceLine()       { return this.c.invoiceLine; }
   get payment()           { return this.c.payment; }
+  get dispute()           { return this.c.dispute; }
+  get message()           { return this.c.message; }
   get idempotencyKey()    { return this.c.idempotencyKey; }
   get driverAdvance()     { return (this.c as any).driverAdvance; }
   get hub()               { return (this.c as any).hub; }

@@ -18,6 +18,7 @@ import { PodsModule } from './pods/pods.module';
 import { AuditsModule } from './audits/audits.module';
 import { BillingModule } from './billing/billing.module';
 import { InvoicesModule } from './invoices/invoices.module';
+import { DisputesModule } from './disputes/disputes.module';
 
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { TenantInterceptor } from './core/tenant/tenant.interceptor';
@@ -53,6 +54,7 @@ import { TenantInterceptor } from './core/tenant/tenant.interceptor';
     AuditsModule,
     BillingModule,
     InvoicesModule,
+    DisputesModule,
   ],
   controllers: [AppController],
   providers: [
