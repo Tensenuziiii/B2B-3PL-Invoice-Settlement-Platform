@@ -46,6 +46,8 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get invoice()           { return this.c.invoice; }
   get invoiceLine()       { return this.c.invoiceLine; }
   get payment()           { return this.c.payment; }
+  get vendorSettlement()      { return this.c.vendorSettlement; }
+  get vendorSettlementItem()  { return this.c.vendorSettlementItem; }
   get dispute()           { return this.c.dispute; }
   get message()           { return this.c.message; }
   get idempotencyKey()    { return this.c.idempotencyKey; }
@@ -64,7 +66,11 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     queries: [...T],
   ): Promise<{ [K in keyof T]: Awaited<T[K]> }>;
   $transaction(input: any, options?: any): any {
-    return (this.c as any).$transaction(input, options);
+    const opts =
+      typeof input === "function"
+        ? { maxWait: 15000, timeout: 30000, ...options }
+        : options;
+    return (this.c as any).$transaction(input, opts);
   }
 
   async onModuleInit()    { await this.c.$connect(); }

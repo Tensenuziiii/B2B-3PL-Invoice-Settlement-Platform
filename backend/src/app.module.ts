@@ -20,6 +20,7 @@ import { BillingModule } from './billing/billing.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { DisputesModule } from './disputes/disputes.module';
 import { PaymentsModule } from './payments/payments.module';
+import { VendorSettlementsModule } from './vendor-settlements/vendor-settlements.module';
 
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { TenantInterceptor } from './core/tenant/tenant.interceptor';
@@ -57,6 +58,7 @@ import { TenantInterceptor } from './core/tenant/tenant.interceptor';
     InvoicesModule,
     DisputesModule,
     PaymentsModule,
+    VendorSettlementsModule,
   ],
   controllers: [AppController],
   providers: [

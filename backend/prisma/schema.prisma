@@ -123,6 +123,13 @@ enum DisputeResolution {
   PARTIAL_ADJUSTMENT
 }
 
+enum SettlementStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  PAID
+}
+
 // ============================================================
 // TENANT ROOT
 // ============================================================
@@ -165,6 +172,8 @@ model Organization {
   disputes          Dispute[]
   messages          Message[]
   notifications     Notification[]
+  vendorSettlements     VendorSettlement[]
+  vendorSettlementItems VendorSettlementItem[]
 
   @@index([status])
 }
@@ -398,6 +407,7 @@ model Trip {
   eodTally     EodTally?
   auditReviews AuditReview[]
   invoiceLine  InvoiceLine?
+  vendorSettlementItem VendorSettlementItem?
 
   @@unique([organizationId, tripNumber])
   @@index([organizationId])
@@ -582,6 +592,52 @@ model Payment {
   @@index([invoiceId])
 }
 
+model VendorSettlement {
+  id                String            @id @default(uuid()) @db.Uuid
+  organizationId    String            @db.Uuid
+  organization      Organization      @relation(fields: [organizationId], references: [id])
+  settlementNumber  String
+  vendorId          String            @db.Uuid
+  vendor            Vendor            @relation(fields: [vendorId], references: [id])
+  status            SettlementStatus  @default(DRAFT)
+  version           Int               @default(0)
+  periodStart       DateTime?         @db.Timestamptz(6)
+  periodEnd         DateTime?         @db.Timestamptz(6)
+  subtotal          Int               @default(0)
+  adjustments       Int               @default(0)
+  total             Int               @default(0)
+  submittedAt       DateTime?         @db.Timestamptz(6)
+  approvedAt        DateTime?         @db.Timestamptz(6)
+  paidAt            DateTime?         @db.Timestamptz(6)
+  notes             String?
+  createdAt         DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime          @updatedAt @db.Timestamptz(6)
+  deletedAt         DateTime?         @db.Timestamptz(6)
+
+  items VendorSettlementItem[]
+
+  @@unique([organizationId, settlementNumber])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, vendorId])
+}
+
+model VendorSettlementItem {
+  id                 String           @id @default(uuid()) @db.Uuid
+  organizationId     String           @db.Uuid
+  organization       Organization     @relation(fields: [organizationId], references: [id])
+  settlementId       String           @db.Uuid
+  settlement         VendorSettlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  tripId             String           @unique @db.Uuid
+  trip               Trip             @relation(fields: [tripId], references: [id])
+  lineAmount         Int
+  snapshot           Json?
+  createdAt          DateTime         @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([settlementId])
+}
+
 model Dispute {
   id                String             @id @default(uuid()) @db.Uuid
   organizationId    String             @db.Uuid
@@ -662,6 +718,7 @@ model Vendor {
 
   rateCards RateCard[]
   trips     Trip[]
+  settlements VendorSettlement[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
