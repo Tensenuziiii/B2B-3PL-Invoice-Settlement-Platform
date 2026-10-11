@@ -6,9 +6,11 @@ import { Roles } from "../common/decorators/roles.decorator";
 import { RolesGuard } from "../common/guards/roles.guard";
 import { InvoicesService } from "./invoices.service";
 import { BillingService } from "../billing/billing.service";
+import { PaymentsService } from "../payments/payments.service";
 import { GenerateInvoiceDto } from "../billing/dto/generate-invoice.dto";
 import { ListInvoicesQueryDto } from "./dto/list-invoices-query.dto";
 import { InvoiceActionDto } from "./dto/invoice-action.dto";
+import { RecordPaymentDto } from "../payments/dto/record-payment.dto";
 
 @ApiTags("invoices")
 @ApiBearerAuth()
@@ -18,6 +20,7 @@ export class InvoicesController {
   constructor(
     private readonly invoicesService: InvoicesService,
     private readonly billingService: BillingService,
+    private readonly paymentsService: PaymentsService,
   ) {}
 
   @Get()
@@ -29,6 +32,29 @@ export class InvoicesController {
       query.clientId = req.user.clientId;
     }
     return this.invoicesService.list(query);
+  }
+
+  @Get(":id/payments")
+  @Roles(Role.ADMIN, Role.ACCOUNTS, Role.CLIENT_AP)
+  @ApiOperation({ summary: "List payments for an invoice" })
+  listPayments(@Param("id") id: string) {
+    return this.paymentsService.listForInvoice(id);
+  }
+
+  @Post(":id/payments")
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.ADMIN, Role.ACCOUNTS)
+  @ApiOperation({ summary: "Record a payment for an invoice" })
+  recordPayment(@Param("id") id: string, @Body() dto: RecordPaymentDto) {
+    return this.paymentsService.recordPayment(id, dto);
+  }
+
+  @Post(":id/mark-paid")
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.ADMIN, Role.ACCOUNTS)
+  @ApiOperation({ summary: "Manually mark invoice as PAID" })
+  markPaid(@Param("id") id: string) {
+    return this.paymentsService.markPaid(id);
   }
 
   @Get(":id")

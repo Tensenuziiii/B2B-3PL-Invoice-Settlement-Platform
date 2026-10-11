@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, NotFoundException } from "@nest
 import { DisputesService } from "./disputes.service";
 import { DisputeNumberService } from "./dispute-number.service";
 import { PrismaService } from "../prisma/prisma.service";
-import { tenantStorage } from "../core/tenant/tenant.context";
+import * as tenantContext from "../core/tenant/tenant.context";
 
 describe("DisputesService", () => {
   let service: DisputesService;
@@ -11,7 +11,7 @@ describe("DisputesService", () => {
   let mockTx: any;
 
   beforeEach(() => {
-    tenantStorage.enterWith({ organizationId: "org-123", userId: "usr-123" });
+    jest.spyOn(tenantContext, "requireTenant").mockReturnValue({ organizationId: "org-123", userId: "usr-123" });
 
     mockTx = {
       invoiceLine: {

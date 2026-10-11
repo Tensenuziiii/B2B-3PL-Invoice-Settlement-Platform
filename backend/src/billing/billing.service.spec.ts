@@ -3,7 +3,7 @@ import { BillingService } from "./billing.service";
 import { RateCardsService } from "../rate-cards/rate-cards.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { InvoiceNumberService } from "./invoice-number.service";
-import { tenantStorage } from "../core/tenant/tenant.context";
+import * as tenantContext from "../core/tenant/tenant.context";
 import { GenerateInvoiceDto } from "./dto/generate-invoice.dto";
 
 describe("BillingService", () => {
@@ -80,7 +80,7 @@ describe("BillingService", () => {
   });
 
   beforeEach(() => {
-    tenantStorage.enterWith({ organizationId: "org-123", userId: "usr-123" });
+    jest.spyOn(tenantContext, "requireTenant").mockReturnValue({ organizationId: "org-123", userId: "usr-123" });
 
     mockRateCardsService = {
       resolve: jest.fn(),
@@ -120,9 +120,6 @@ describe("BillingService", () => {
     );
   });
 
-  afterEach(() => {
-    tenantStorage.disable();
-  });
 
   it("1. calculateTripCharge() throws when trip has no clientId", async () => {
     const trip = createMockTrip({ clientId: null });

@@ -1,7 +1,6 @@
 import { NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditsService } from "./audits.service";
-import { tenantStorage } from "../core/tenant/tenant.context";
 
 describe("AuditsService", () => {
   let service: AuditsService;
@@ -10,7 +9,6 @@ describe("AuditsService", () => {
   let tripFindFirst: jest.Mock;
 
   beforeEach(() => {
-    tenantStorage.enterWith({ organizationId: "org-123", userId: "usr-123" });
 
     tripFindMany = jest.fn().mockResolvedValue([]);
     tripCount = jest.fn().mockResolvedValue(0);
@@ -27,9 +25,6 @@ describe("AuditsService", () => {
     service = new AuditsService(mockPrisma);
   });
 
-  afterEach(() => {
-    tenantStorage.disable();
-  });
 
   it("1. queue() returns only AUDIT_PENDING trips (filters where.status)", async () => {
     const mockTrips = [

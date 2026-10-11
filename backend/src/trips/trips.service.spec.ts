@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, NotFoundException } from "@nest
 import { PrismaService } from "../prisma/prisma.service";
 import { TripNumberService } from "./trip-number.service";
 import { TripsService } from "./trips.service";
-import { tenantStorage } from "../core/tenant/tenant.context";
+import * as tenantContext from "../core/tenant/tenant.context";
 
 describe("TripsService", () => {
   let service: TripsService;
@@ -62,7 +62,7 @@ describe("TripsService", () => {
   };
 
   beforeEach(() => {
-    tenantStorage.enterWith({ organizationId: "org-123", userId: "usr-123" });
+    jest.spyOn(tenantContext, "requireTenant").mockReturnValue({ organizationId: "org-123", userId: "usr-123" });
 
     tripFindMany = jest.fn().mockResolvedValue([mockTrip]);
     tripCount = jest.fn().mockResolvedValue(1);
@@ -146,9 +146,6 @@ describe("TripsService", () => {
     service = new TripsService(mockPrisma, mockTripNumberService);
   });
 
-  afterEach(() => {
-    tenantStorage.disable();
-  });
 
   it("1. list() filters by status", async () => {
     const result = await service.list({ status: "ASSIGNED" });

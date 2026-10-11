@@ -3,7 +3,7 @@ import { PodDocumentType } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { StorageService, ALLOWED_CONTENT_TYPES, MAX_FILE_SIZE_BYTES } from "../storage/storage.service";
 import { PodsService } from "./pods.service";
-import { tenantStorage } from "../core/tenant/tenant.context";
+import * as tenantContext from "../core/tenant/tenant.context";
 
 describe("PodsService", () => {
   let service: PodsService;
@@ -19,7 +19,7 @@ describe("PodsService", () => {
   let storageDelete: jest.Mock;
 
   beforeEach(() => {
-    tenantStorage.enterWith({ organizationId: "org-test", userId: "user-test" });
+    jest.spyOn(tenantContext, "requireTenant").mockReturnValue({ organizationId: "org-test", userId: "user-test" });
 
     tripStopFindFirst = jest.fn().mockResolvedValue({
       id: "stop-1",
@@ -70,9 +70,6 @@ describe("PodsService", () => {
     service = new PodsService(mockPrisma, mockStorage);
   });
 
-  afterEach(() => {
-    tenantStorage.disable();
-  });
 
   it("1. presignUpload() rejects unsupported content type (image/gif)", async () => {
     await expect(
