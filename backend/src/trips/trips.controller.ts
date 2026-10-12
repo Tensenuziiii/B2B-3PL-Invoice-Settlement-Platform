@@ -86,6 +86,13 @@ export class TripsController {
     return this.tripsService.getSummary(id);
   }
 
+  @Get("current")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.DRIVER)
+  @ApiOperation({ summary: "Get the driver's current active trip" })
+  current(@Req() req: any) {
+    return this.tripsService.getCurrentTripForDriver(req.user.sub);
+  }
+
   @Get(":id")
   @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.AUDITOR, Role.ACCOUNTS, Role.DRIVER)
   @ApiOperation({ summary: "Get a trip with stops" })

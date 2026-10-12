@@ -21,7 +21,7 @@ describe('AppController (e2e)', () => {
     return request(app.getHttpServer())
       .get('/api/v1')
       .expect(200)
-      .expect('Hello World!');
+      .expect({ name: 'VECTO Logistics API', version: '1.0' });
   });
 
   afterEach(async () => {

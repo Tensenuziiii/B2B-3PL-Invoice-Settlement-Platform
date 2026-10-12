@@ -96,6 +96,45 @@ export class TripsService {
     return { data, meta: { total, limit, offset: skip } };
   }
 
+  async getCurrentTripForDriver(userId: string) {
+    // Find the Driver profile linked to this user
+    const driver = await this.prisma.driver.findFirst({
+      where: { userId },
+      select: { id: true },
+    });
+
+    if (!driver) {
+      // User has DRIVER role but no Driver profile — return null
+      return { data: null };
+    }
+
+    // Find the active trip: status is one of the in-progress states
+    const trip = await this.prisma.trip.findFirst({
+      where: {
+        driverId: driver.id,
+        deletedAt: null,
+        status: {
+          in: ["ASSIGNED", "IN_PROGRESS", "DELIVERY_IN_PROGRESS", "DELIVERED"],
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      include: {
+        client: { select: { id: true, name: true, code: true } },
+        driver: { select: { id: true, name: true, phone: true } },
+        vehicle: { select: { id: true, regNo: true } },
+        tripStops: {
+          orderBy: { sequence: "asc" },
+          include: {
+            podDocuments: true,
+            collection: true,
+          },
+        },
+      },
+    });
+
+    return { data: trip };
+  }
+
   async get(id: string) {
     const trip = await this.prisma.trip.findFirst({
       where: { id, deletedAt: null },

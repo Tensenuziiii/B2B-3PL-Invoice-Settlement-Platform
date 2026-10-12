@@ -25,6 +25,7 @@ describe("TripsService", () => {
   let eodTallyFindFirst: jest.Mock;
   let eodTallyCreate: jest.Mock;
   let nextTripNumber: jest.Mock;
+  let driverFindFirst: jest.Mock;
   let mockTx: any;
   let prismaTransaction: jest.Mock;
 
@@ -82,6 +83,7 @@ describe("TripsService", () => {
     tripStopFindMany = jest.fn().mockResolvedValue([]);
     eodTallyFindFirst = jest.fn().mockResolvedValue(null);
     eodTallyCreate = jest.fn().mockImplementation((args: any) => Promise.resolve({ id: "tally-1", ...args.data }));
+    driverFindFirst = jest.fn().mockResolvedValue(null);
 
     mockTx = {
       trip: {
@@ -135,6 +137,9 @@ describe("TripsService", () => {
       },
       eodTally: {
         findFirst: eodTallyFindFirst,
+      },
+      driver: {
+        findFirst: driverFindFirst,
       },
       $transaction: prismaTransaction,
     } as unknown as PrismaService;
@@ -577,5 +582,77 @@ describe("TripsService", () => {
     eodTallyFindFirst.mockResolvedValue(null);
 
     await expect(service.getEod("trp-123")).rejects.toThrow(NotFoundException);
+  });
+
+  it("32. getCurrentTripForDriver() returns { data: null } when user has no Driver profile", async () => {
+    driverFindFirst.mockResolvedValue(null);
+
+    const result = await service.getCurrentTripForDriver("usr-no-driver");
+
+    expect(driverFindFirst).toHaveBeenCalledWith({
+      where: { userId: "usr-no-driver" },
+      select: { id: true },
+    });
+    expect(result).toEqual({ data: null });
+  });
+
+  it("33. getCurrentTripForDriver() returns { data: null } when driver has no active trip", async () => {
+    driverFindFirst.mockResolvedValue({ id: "drv-123" });
+    tripFindFirst.mockResolvedValue(null);
+
+    const result = await service.getCurrentTripForDriver("usr-123");
+
+    expect(driverFindFirst).toHaveBeenCalledWith({
+      where: { userId: "usr-123" },
+      select: { id: true },
+    });
+    expect(tripFindFirst).toHaveBeenCalledWith({
+      where: {
+        driverId: "drv-123",
+        deletedAt: null,
+        status: {
+          in: ["ASSIGNED", "IN_PROGRESS", "DELIVERY_IN_PROGRESS", "DELIVERED"],
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      include: {
+        client: { select: { id: true, name: true, code: true } },
+        driver: { select: { id: true, name: true, phone: true } },
+        vehicle: { select: { id: true, regNo: true } },
+        tripStops: {
+          orderBy: { sequence: "asc" },
+          include: {
+            podDocuments: true,
+            collection: true,
+          },
+        },
+      },
+    });
+    expect(result).toEqual({ data: null });
+  });
+
+  it("34. getCurrentTripForDriver() returns { data: trip } with stops, pods, collections when active trip exists", async () => {
+    const activeTrip = {
+      ...mockTrip,
+      status: "IN_PROGRESS",
+      client: { id: "cli-123", name: "Client A", code: "CLI-A" },
+      driver: { id: "drv-123", name: "Driver A", phone: "+919876543210" },
+      vehicle: { id: "veh-123", regNo: "MH-12-0001" },
+      tripStops: [
+        {
+          id: "stop-1",
+          sequence: 1,
+          name: "Stop 1",
+          podDocuments: [{ id: "pod-1" }],
+          collection: { id: "col-1", actualAmount: 500 },
+        },
+      ],
+    };
+    driverFindFirst.mockResolvedValue({ id: "drv-123" });
+    tripFindFirst.mockResolvedValue(activeTrip);
+
+    const result = await service.getCurrentTripForDriver("usr-123");
+
+    expect(result).toEqual({ data: activeTrip });
   });
 });

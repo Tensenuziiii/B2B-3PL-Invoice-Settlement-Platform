@@ -504,4 +504,82 @@ describe("Trips (e2e)", () => {
       .send({ version: 0 })
       .expect(404);
   }, 30000);
+
+  it("35. GET /api/v1/trips/current as DRIVER returns { data: Trip | null }", async () => {
+    const ts = Date.now().toString();
+    const driverUser = await prisma.user.create({
+      data: {
+        organizationId: orgA.id,
+        email: `driver-curr-${ts}@e2e-trp.test`,
+        name: "Current Driver",
+        initials: "CD",
+        displayId: `D-${ts.slice(-4)}`,
+        role: "DRIVER",
+        passwordHash: await argon2.hash("Enterprise@2026"),
+      },
+    });
+
+    const driverToken = jwt.sign({
+      sub: driverUser.id,
+      email: driverUser.email,
+      role: "DRIVER",
+      displayId: `D-${ts.slice(-4)}`,
+      hubName: null,
+      orgId: orgA.id,
+      permissions: [],
+    });
+
+    const res = await request(app.getHttpServer())
+      .get("/api/v1/trips/current")
+      .set("Authorization", `Bearer ${driverToken}`)
+      .expect(200);
+
+    expect(res.body).toHaveProperty("data");
+    expect(res.body.data).toBeNull();
+
+    const driver = await prisma.driver.create({
+      data: {
+        organizationId: orgA.id,
+        name: "Driver CD",
+        phone: `+91${ts.slice(-10)}`,
+        userId: driverUser.id,
+      },
+    });
+
+    const activeTrip = await prisma.trip.create({
+      data: {
+        organizationId: orgA.id,
+        tripNumber: `TRP-CURR-${ts.slice(-6)}`,
+        origin: "Origin Hub",
+        destination: "Destination Dock",
+        status: "IN_PROGRESS",
+        driverId: driver.id,
+        tripStops: {
+          create: {
+            organizationId: orgA.id,
+            sequence: 1,
+            name: "Stop 1",
+            expectedQty: 10,
+          },
+        },
+      },
+    });
+
+    const resActive = await request(app.getHttpServer())
+      .get("/api/v1/trips/current")
+      .set("Authorization", `Bearer ${driverToken}`)
+      .expect(200);
+
+    expect(resActive.body).toHaveProperty("data");
+    expect(resActive.body.data).not.toBeNull();
+    expect(resActive.body.data.id).toBe(activeTrip.id);
+    expect(resActive.body.data.status).toBe("IN_PROGRESS");
+    expect(resActive.body.data.tripStops).toHaveLength(1);
+  }, 30000);
+
+  it("36. GET /api/v1/trips/current without JWT returns 401", async () => {
+    await request(app.getHttpServer())
+      .get("/api/v1/trips/current")
+      .expect(401);
+  }, 30000);
 });
