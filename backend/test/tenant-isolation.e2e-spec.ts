@@ -22,6 +22,7 @@ describe("Tenant isolation (e2e)", () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
     app.use((req: any, _res: any, next: any) => {
       const authHeader = req.headers?.authorization;
       if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
@@ -117,14 +118,14 @@ describe("Tenant isolation (e2e)", () => {
 
   it("Org A cannot read Org B's user by id (returns 404)", async () => {
     await request(app.getHttpServer())
-      .get(`/users/${orgB.userId}`)
+      .get(`/api/v1/users/${orgB.userId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   });
 
   it("Org A cannot list Org B's users (only sees its own)", async () => {
     const res = await request(app.getHttpServer())
-      .get("/users")
+      .get("/api/v1/users")
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(200);
 
@@ -135,7 +136,7 @@ describe("Tenant isolation (e2e)", () => {
 
   it("Org A cannot update Org B's user (returns 404)", async () => {
     await request(app.getHttpServer())
-      .patch(`/users/${orgB.userId}`)
+      .patch(`/api/v1/users/${orgB.userId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ name: "Hacked" })
       .expect(404);
@@ -143,14 +144,14 @@ describe("Tenant isolation (e2e)", () => {
 
   it("Org A cannot deactivate Org B's user (returns 404)", async () => {
     await request(app.getHttpServer())
-      .delete(`/users/${orgB.userId}`)
+      .delete(`/api/v1/users/${orgB.userId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   });
 
   it("Errors use the frozen envelope shape", async () => {
     const res = await request(app.getHttpServer())
-      .get(`/users/${orgB.userId}`)
+      .get(`/api/v1/users/${orgB.userId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
 

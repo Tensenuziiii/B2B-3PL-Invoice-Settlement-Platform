@@ -26,6 +26,7 @@ describe("Vehicles (e2e)", () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
     app.use((req: any, _res: any, next: any) => {
       const authHeader = req.headers?.authorization;
       if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
@@ -172,7 +173,7 @@ describe("Vehicles (e2e)", () => {
 
   it("1. POST /vehicles creates a vehicle for Org A", async () => {
     const res = await request(app.getHttpServer())
-      .post("/vehicles")
+      .post("/api/v1/vehicles")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         regNo: "mh-12-aa-1111",
@@ -194,7 +195,7 @@ describe("Vehicles (e2e)", () => {
 
   it("2. GET /vehicles returns only Org A's vehicles", async () => {
     const res = await request(app.getHttpServer())
-      .get("/vehicles")
+      .get("/api/v1/vehicles")
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(200);
 
@@ -206,14 +207,14 @@ describe("Vehicles (e2e)", () => {
 
   it("3. GET /vehicles/:id as Org A for Org B's vehicle returns 404", async () => {
     await request(app.getHttpServer())
-      .get(`/vehicles/${orgBVehicleId}`)
+      .get(`/api/v1/vehicles/${orgBVehicleId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   }, 30000);
 
   it("4. PATCH /vehicles/:id as Org A on Org B's vehicle returns 404", async () => {
     await request(app.getHttpServer())
-      .patch(`/vehicles/${orgBVehicleId}`)
+      .patch(`/api/v1/vehicles/${orgBVehicleId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ type: "Hacked" })
       .expect(404);
@@ -221,14 +222,14 @@ describe("Vehicles (e2e)", () => {
 
   it("5. DELETE /vehicles/:id as Org A on Org B's vehicle returns 404", async () => {
     await request(app.getHttpServer())
-      .delete(`/vehicles/${orgBVehicleId}`)
+      .delete(`/api/v1/vehicles/${orgBVehicleId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   }, 30000);
 
   it("6. Duplicate regNo within same org returns 409", async () => {
     await request(app.getHttpServer())
-      .post("/vehicles")
+      .post("/api/v1/vehicles")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         regNo: "MH-12-AA-1111",
@@ -238,7 +239,7 @@ describe("Vehicles (e2e)", () => {
 
   it("7. Missing JWT returns 401", async () => {
     await request(app.getHttpServer())
-      .get("/vehicles")
+      .get("/api/v1/vehicles")
       .expect(401);
   }, 30000);
 });

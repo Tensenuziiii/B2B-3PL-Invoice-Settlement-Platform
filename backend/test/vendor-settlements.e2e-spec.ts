@@ -51,6 +51,7 @@ describe("VendorSettlements (e2e)", () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
     app.use((req: any, _res: any, next: any) => {
       const authHeader = req.headers?.authorization;
       if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
@@ -262,7 +263,7 @@ describe("VendorSettlements (e2e)", () => {
 
   it("1. POST /vendor-settlements creates DRAFT with settlementNumber /^STL-\\d{6}-\\d{4}$/", async () => {
     const res = await request(app.getHttpServer())
-      .post("/vendor-settlements")
+      .post("/api/v1/vendor-settlements")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         vendorId: vendorAId,
@@ -281,7 +282,7 @@ describe("VendorSettlements (e2e)", () => {
 
   it("2. POST /vendor-settlements with non-READY_FOR_BILLING trip → 400", async () => {
     const res = await request(app.getHttpServer())
-      .post("/vendor-settlements")
+      .post("/api/v1/vendor-settlements")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         vendorId: vendorAId,
@@ -294,7 +295,7 @@ describe("VendorSettlements (e2e)", () => {
   it("3. GET /vendor-settlements returns Org A settlements only", async () => {
     // Org A request
     const resA = await request(app.getHttpServer())
-      .get("/vendor-settlements")
+      .get("/api/v1/vendor-settlements")
       .set("Authorization", `Bearer ${orgA.token}`);
 
     expect(resA.status).toBe(200);
@@ -304,7 +305,7 @@ describe("VendorSettlements (e2e)", () => {
 
     // Org B request
     const resB = await request(app.getHttpServer())
-      .get("/vendor-settlements")
+      .get("/api/v1/vendor-settlements")
       .set("Authorization", `Bearer ${orgB.token}`);
 
     expect(resB.status).toBe(200);
@@ -315,7 +316,7 @@ describe("VendorSettlements (e2e)", () => {
 
   it("4. GET /vendor-settlements/:id cross-tenant → 404", async () => {
     const res = await request(app.getHttpServer())
-      .get(`/vendor-settlements/${settlement1Id}`)
+      .get(`/api/v1/vendor-settlements/${settlement1Id}`)
       .set("Authorization", `Bearer ${orgB.token}`);
 
     expect(res.status).toBe(404);
@@ -323,7 +324,7 @@ describe("VendorSettlements (e2e)", () => {
 
   it("5. POST /vendor-settlements/:id/submit → status SUBMITTED", async () => {
     const res = await request(app.getHttpServer())
-      .post(`/vendor-settlements/${settlement1Id}/submit`)
+      .post(`/api/v1/vendor-settlements/${settlement1Id}/submit`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 0, notes: "Submitting settlement" });
 
@@ -336,7 +337,7 @@ describe("VendorSettlements (e2e)", () => {
   it("6. Full lifecycle: submit → approve → mark-paid all return updated status", async () => {
     // Generate new settlement with trip2
     const createRes = await request(app.getHttpServer())
-      .post("/vendor-settlements")
+      .post("/api/v1/vendor-settlements")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         vendorId: vendorAId,
@@ -349,7 +350,7 @@ describe("VendorSettlements (e2e)", () => {
 
     // Submit (DRAFT -> SUBMITTED)
     const submitRes = await request(app.getHttpServer())
-      .post(`/vendor-settlements/${id}/submit`)
+      .post(`/api/v1/vendor-settlements/${id}/submit`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 0 });
 
@@ -359,7 +360,7 @@ describe("VendorSettlements (e2e)", () => {
 
     // Approve (SUBMITTED -> APPROVED)
     const approveRes = await request(app.getHttpServer())
-      .post(`/vendor-settlements/${id}/approve`)
+      .post(`/api/v1/vendor-settlements/${id}/approve`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 1 });
 
@@ -369,7 +370,7 @@ describe("VendorSettlements (e2e)", () => {
 
     // Mark Paid (APPROVED -> PAID)
     const paidRes = await request(app.getHttpServer())
-      .post(`/vendor-settlements/${id}/mark-paid`)
+      .post(`/api/v1/vendor-settlements/${id}/mark-paid`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 2 });
 

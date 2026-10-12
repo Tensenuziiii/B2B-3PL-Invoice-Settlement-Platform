@@ -26,6 +26,7 @@ describe("Drivers (e2e)", () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
     app.use((req: any, _res: any, next: any) => {
       const authHeader = req.headers?.authorization;
       if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
@@ -172,7 +173,7 @@ describe("Drivers (e2e)", () => {
 
   it("1. POST /drivers creates a driver for Org A", async () => {
     const res = await request(app.getHttpServer())
-      .post("/drivers")
+      .post("/api/v1/drivers")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "Driver A",
@@ -193,7 +194,7 @@ describe("Drivers (e2e)", () => {
 
   it("2. GET /drivers returns only Org A's drivers", async () => {
     const res = await request(app.getHttpServer())
-      .get("/drivers")
+      .get("/api/v1/drivers")
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(200);
 
@@ -205,14 +206,14 @@ describe("Drivers (e2e)", () => {
 
   it("3. GET /drivers/:id as Org A for Org B's driver returns 404", async () => {
     await request(app.getHttpServer())
-      .get(`/drivers/${orgBDriverId}`)
+      .get(`/api/v1/drivers/${orgBDriverId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   }, 30000);
 
   it("4. PATCH /drivers/:id as Org A on Org B's driver returns 404", async () => {
     await request(app.getHttpServer())
-      .patch(`/drivers/${orgBDriverId}`)
+      .patch(`/api/v1/drivers/${orgBDriverId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ name: "Hacked" })
       .expect(404);
@@ -220,14 +221,14 @@ describe("Drivers (e2e)", () => {
 
   it("5. DELETE /drivers/:id as Org A on Org B's driver returns 404", async () => {
     await request(app.getHttpServer())
-      .delete(`/drivers/${orgBDriverId}`)
+      .delete(`/api/v1/drivers/${orgBDriverId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   }, 30000);
 
   it("6. Duplicate phone within same org returns 409", async () => {
     await request(app.getHttpServer())
-      .post("/drivers")
+      .post("/api/v1/drivers")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "Driver A Duplicate",
@@ -238,7 +239,7 @@ describe("Drivers (e2e)", () => {
 
   it("7. Invalid phone returns 422", async () => {
     await request(app.getHttpServer())
-      .post("/drivers")
+      .post("/api/v1/drivers")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "Invalid Phone Driver",
@@ -249,7 +250,7 @@ describe("Drivers (e2e)", () => {
 
   it("8. Missing JWT returns 401", async () => {
     await request(app.getHttpServer())
-      .get("/drivers")
+      .get("/api/v1/drivers")
       .expect(401);
   }, 30000);
 });

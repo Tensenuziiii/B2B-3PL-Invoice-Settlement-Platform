@@ -62,6 +62,7 @@ describe("Invoices (e2e)", () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
     app.use((req: any, _res: any, next: any) => {
       const authHeader = req.headers?.authorization;
       if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
@@ -357,7 +358,7 @@ describe("Invoices (e2e)", () => {
 
   it("1. POST /invoices creates a DRAFT invoice from READY_FOR_BILLING trips → 201, invoiceNumber matches /^INV-\\d{6}-\\d{4}$/, status=DRAFT", async () => {
     const res = await request(app.getHttpServer())
-      .post("/invoices")
+      .post("/api/v1/invoices")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         clientId: clientA1Id,
@@ -375,7 +376,7 @@ describe("Invoices (e2e)", () => {
 
   it("2. POST /invoices with a non-READY_FOR_BILLING trip → 400", async () => {
     await request(app.getHttpServer())
-      .post("/invoices")
+      .post("/api/v1/invoices")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         clientId: clientA1Id,
@@ -388,7 +389,7 @@ describe("Invoices (e2e)", () => {
 
   it("3. POST /invoices with trips from different clients → 400", async () => {
     await request(app.getHttpServer())
-      .post("/invoices")
+      .post("/api/v1/invoices")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         clientId: clientA1Id,
@@ -401,7 +402,7 @@ describe("Invoices (e2e)", () => {
 
   it("4. GET /invoices returns only Org A's invoices", async () => {
     const resA = await request(app.getHttpServer())
-      .get("/invoices")
+      .get("/api/v1/invoices")
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(200);
 
@@ -410,7 +411,7 @@ describe("Invoices (e2e)", () => {
     expect(resA.body.data.every((inv: any) => inv.id !== orgBInvoiceId)).toBe(true);
 
     const resB = await request(app.getHttpServer())
-      .get("/invoices")
+      .get("/api/v1/invoices")
       .set("Authorization", `Bearer ${orgB.token}`)
       .expect(200);
 
@@ -421,14 +422,14 @@ describe("Invoices (e2e)", () => {
 
   it("5. GET /invoices/:id cross-tenant → 404", async () => {
     await request(app.getHttpServer())
-      .get(`/invoices/${invoiceId}`)
+      .get(`/api/v1/invoices/${invoiceId}`)
       .set("Authorization", `Bearer ${orgB.token}`)
       .expect(404);
   }, 30000);
 
   it("6. POST /invoices/:id/submit DRAFT → SUBMITTED (200, status=SUBMITTED, version+1)", async () => {
     const res = await request(app.getHttpServer())
-      .post(`/invoices/${invoiceId}/submit`)
+      .post(`/api/v1/invoices/${invoiceId}/submit`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 0 })
       .expect(200);
@@ -439,7 +440,7 @@ describe("Invoices (e2e)", () => {
 
   it("7. POST /invoices/:id/submit with stale version → 409", async () => {
     await request(app.getHttpServer())
-      .post(`/invoices/${invoiceId}/submit`)
+      .post(`/api/v1/invoices/${invoiceId}/submit`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 0 })
       .expect(409);
@@ -447,7 +448,7 @@ describe("Invoices (e2e)", () => {
 
   it("8. POST /invoices/:id/send-to-client SUBMITTED → CLIENT_REVIEW", async () => {
     const res = await request(app.getHttpServer())
-      .post(`/invoices/${invoiceId}/send-to-client`)
+      .post(`/api/v1/invoices/${invoiceId}/send-to-client`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 1 })
       .expect(200);
@@ -458,7 +459,7 @@ describe("Invoices (e2e)", () => {
 
   it("9. POST /invoices/:id/approve CLIENT_REVIEW → APPROVED", async () => {
     const res = await request(app.getHttpServer())
-      .post(`/invoices/${invoiceId}/approve`)
+      .post(`/api/v1/invoices/${invoiceId}/approve`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 2 })
       .expect(200);
@@ -469,7 +470,7 @@ describe("Invoices (e2e)", () => {
 
   it("10. DELETE /invoices/:id cancels DRAFT invoice (200), then GET → 404", async () => {
     const createRes = await request(app.getHttpServer())
-      .post("/invoices")
+      .post("/api/v1/invoices")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         clientId: clientA1Id,
@@ -482,7 +483,7 @@ describe("Invoices (e2e)", () => {
     const draftId = createRes.body.id;
 
     const cancelRes = await request(app.getHttpServer())
-      .delete(`/invoices/${draftId}`)
+      .delete(`/api/v1/invoices/${draftId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 0 })
       .expect(200);
@@ -490,7 +491,7 @@ describe("Invoices (e2e)", () => {
     expect(cancelRes.body.status).toBe("CANCELLED");
 
     await request(app.getHttpServer())
-      .get(`/invoices/${draftId}`)
+      .get(`/api/v1/invoices/${draftId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   }, 30000);

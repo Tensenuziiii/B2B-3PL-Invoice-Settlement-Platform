@@ -56,6 +56,7 @@ describe("Trips (e2e)", () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
     app.use((req: any, _res: any, next: any) => {
       const authHeader = req.headers?.authorization;
       if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
@@ -210,7 +211,7 @@ describe("Trips (e2e)", () => {
 
   it("1. POST /trips creates trip with stops → tripNumber matches /^TRP-\\d{6}-\\d{4}$/", async () => {
     const res = await request(app.getHttpServer())
-      .post("/trips")
+      .post("/api/v1/trips")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         origin: "Mumbai Hub",
@@ -249,7 +250,7 @@ describe("Trips (e2e)", () => {
 
   it("2. Second POST creates trip with incrementing sequence (0001, 0002)", async () => {
     const res = await request(app.getHttpServer())
-      .post("/trips")
+      .post("/api/v1/trips")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         origin: "Mumbai Hub",
@@ -270,7 +271,7 @@ describe("Trips (e2e)", () => {
 
   it("3. GET /trips returns only Org A's trips", async () => {
     const res = await request(app.getHttpServer())
-      .get("/trips")
+      .get("/api/v1/trips")
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(200);
 
@@ -282,14 +283,14 @@ describe("Trips (e2e)", () => {
 
   it("4. GET /trips/:id cross-tenant → 404", async () => {
     await request(app.getHttpServer())
-      .get(`/trips/${orgBTripId}`)
+      .get(`/api/v1/trips/${orgBTripId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   }, 30000);
 
   it("5. PATCH /trips/:id cross-tenant → 404", async () => {
     await request(app.getHttpServer())
-      .patch(`/trips/${orgBTripId}`)
+      .patch(`/api/v1/trips/${orgBTripId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ origin: "Hacked Origin" })
       .expect(404);
@@ -297,14 +298,14 @@ describe("Trips (e2e)", () => {
 
   it("6. DELETE /trips/:id cross-tenant → 404", async () => {
     await request(app.getHttpServer())
-      .delete(`/trips/${orgBTripId}`)
+      .delete(`/api/v1/trips/${orgBTripId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   }, 30000);
 
   it("7. POST /trips with empty stops → 400", async () => {
     await request(app.getHttpServer())
-      .post("/trips")
+      .post("/api/v1/trips")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         origin: "Mumbai Hub",
@@ -316,7 +317,7 @@ describe("Trips (e2e)", () => {
 
   it("8. POST /trips without JWT → 401", async () => {
     await request(app.getHttpServer())
-      .post("/trips")
+      .post("/api/v1/trips")
       .send({
         origin: "Mumbai Hub",
         destination: "Pune Hub",
@@ -327,7 +328,7 @@ describe("Trips (e2e)", () => {
 
   it("9. POST /trips/:id/start transitions ASSIGNED → IN_PROGRESS (200, status=IN_PROGRESS, version+1)", async () => {
     const createRes = await request(app.getHttpServer())
-      .post("/trips")
+      .post("/api/v1/trips")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         origin: "Mumbai Hub",
@@ -344,7 +345,7 @@ describe("Trips (e2e)", () => {
     expect(createRes.body.version).toBe(0);
 
     const res = await request(app.getHttpServer())
-      .post(`/trips/${lifecycleTripId}/start`)
+      .post(`/api/v1/trips/${lifecycleTripId}/start`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 0 })
       .expect(200);
@@ -357,7 +358,7 @@ describe("Trips (e2e)", () => {
 
   it("10. POST /trips/:id/start with stale version returns 409", async () => {
     await request(app.getHttpServer())
-      .post(`/trips/${lifecycleTripId}/start`)
+      .post(`/api/v1/trips/${lifecycleTripId}/start`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 0 })
       .expect(409);
@@ -379,7 +380,7 @@ describe("Trips (e2e)", () => {
     });
 
     await request(app.getHttpServer())
-      .post(`/trips/${odoTrip.id}/end`)
+      .post(`/api/v1/trips/${odoTrip.id}/end`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 0, odometerEnd: 950 })
       .expect(400);
@@ -387,7 +388,7 @@ describe("Trips (e2e)", () => {
 
   it("12. POST /trips/:id/audit with invalid status returns 400", async () => {
     await request(app.getHttpServer())
-      .post(`/trips/${orgATripId}/audit`)
+      .post(`/api/v1/trips/${orgATripId}/audit`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         version: 0,
@@ -400,7 +401,7 @@ describe("Trips (e2e)", () => {
   it("13. Full happy-path flow: create → start → arrive → end → close → audit → ready-for-billing (all 200s, statuses progress)", async () => {
     // 1. Create
     const createRes = await request(app.getHttpServer())
-      .post("/trips")
+      .post("/api/v1/trips")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         origin: "Alpha Hub",
@@ -426,7 +427,7 @@ describe("Trips (e2e)", () => {
 
     // 2. Start (ASSIGNED → IN_PROGRESS)
     const startRes = await request(app.getHttpServer())
-      .post(`/trips/${tripId}/start`)
+      .post(`/api/v1/trips/${tripId}/start`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 0 })
       .expect(200);
@@ -437,7 +438,7 @@ describe("Trips (e2e)", () => {
 
     // 3. Arrive (IN_PROGRESS → DELIVERY_IN_PROGRESS)
     const arriveRes = await request(app.getHttpServer())
-      .post(`/trips/${tripId}/arrive`)
+      .post(`/api/v1/trips/${tripId}/arrive`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 1, tripStopId: stopId })
       .expect(200);
@@ -447,7 +448,7 @@ describe("Trips (e2e)", () => {
 
     // 4. End (DELIVERY_IN_PROGRESS → DELIVERED)
     const endRes = await request(app.getHttpServer())
-      .post(`/trips/${tripId}/end`)
+      .post(`/api/v1/trips/${tripId}/end`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 2, odometerEnd: 560 })
       .expect(200);
@@ -459,7 +460,7 @@ describe("Trips (e2e)", () => {
 
     // 5. Close (DELIVERED → AUDIT_PENDING)
     const closeRes = await request(app.getHttpServer())
-      .post(`/trips/${tripId}/close`)
+      .post(`/api/v1/trips/${tripId}/close`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 3 })
       .expect(200);
@@ -471,7 +472,7 @@ describe("Trips (e2e)", () => {
 
     // 6. Audit (AUDIT_PENDING → AUDITED)
     const auditRes = await request(app.getHttpServer())
-      .post(`/trips/${tripId}/audit`)
+      .post(`/api/v1/trips/${tripId}/audit`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         version: 4,
@@ -486,7 +487,7 @@ describe("Trips (e2e)", () => {
 
     // 7. Ready for billing (AUDITED → READY_FOR_BILLING)
     const billingRes = await request(app.getHttpServer())
-      .post(`/trips/${tripId}/ready-for-billing`)
+      .post(`/api/v1/trips/${tripId}/ready-for-billing`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 5 })
       .expect(200);
@@ -498,7 +499,7 @@ describe("Trips (e2e)", () => {
 
   it("14. Cross-tenant: Org A cannot start Org B's trip → 404", async () => {
     await request(app.getHttpServer())
-      .post(`/trips/${orgBTripId}/start`)
+      .post(`/api/v1/trips/${orgBTripId}/start`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 0 })
       .expect(404);

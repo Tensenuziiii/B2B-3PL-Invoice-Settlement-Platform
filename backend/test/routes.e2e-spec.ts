@@ -26,6 +26,7 @@ describe("Routes (e2e)", () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
     app.use((req: any, _res: any, next: any) => {
       const authHeader = req.headers?.authorization;
       if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
@@ -174,7 +175,7 @@ describe("Routes (e2e)", () => {
 
   it("1. POST /routes creates a route for Org A", async () => {
     const res = await request(app.getHttpServer())
-      .post("/routes")
+      .post("/api/v1/routes")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "Route A Mumbai-Pune",
@@ -198,7 +199,7 @@ describe("Routes (e2e)", () => {
 
   it("2. Duplicate name returns 409", async () => {
     await request(app.getHttpServer())
-      .post("/routes")
+      .post("/api/v1/routes")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "Route A Mumbai-Pune",
@@ -211,7 +212,7 @@ describe("Routes (e2e)", () => {
 
   it("3. Invalid expectedKm (0 or negative) returns 422", async () => {
     await request(app.getHttpServer())
-      .post("/routes")
+      .post("/api/v1/routes")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "Route Invalid KM",
@@ -224,7 +225,7 @@ describe("Routes (e2e)", () => {
 
   it("4. GET /routes returns only Org A's routes", async () => {
     const res = await request(app.getHttpServer())
-      .get("/routes")
+      .get("/api/v1/routes")
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(200);
 
@@ -236,14 +237,14 @@ describe("Routes (e2e)", () => {
 
   it("5. GET /routes/:id cross-tenant → 404", async () => {
     await request(app.getHttpServer())
-      .get(`/routes/${orgBRouteId}`)
+      .get(`/api/v1/routes/${orgBRouteId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   }, 30000);
 
   it("6. PATCH cross-tenant → 404", async () => {
     await request(app.getHttpServer())
-      .patch(`/routes/${orgBRouteId}`)
+      .patch(`/api/v1/routes/${orgBRouteId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ name: "Hacked Route" })
       .expect(404);
@@ -251,14 +252,14 @@ describe("Routes (e2e)", () => {
 
   it("7. DELETE cross-tenant → 404", async () => {
     await request(app.getHttpServer())
-      .delete(`/routes/${orgBRouteId}`)
+      .delete(`/api/v1/routes/${orgBRouteId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   }, 30000);
 
   it("8. Missing JWT returns 401", async () => {
     await request(app.getHttpServer())
-      .get("/routes")
+      .get("/api/v1/routes")
       .expect(401);
   }, 30000);
 });

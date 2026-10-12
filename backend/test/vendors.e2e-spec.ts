@@ -26,6 +26,7 @@ describe("Vendors (e2e)", () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
     app.use((req: any, _res: any, next: any) => {
       const authHeader = req.headers?.authorization;
       if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
@@ -171,7 +172,7 @@ describe("Vendors (e2e)", () => {
 
   it("1. POST /vendors creates a vendor for Org A", async () => {
     const res = await request(app.getHttpServer())
-      .post("/vendors")
+      .post("/api/v1/vendors")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "Vendor A",
@@ -195,7 +196,7 @@ describe("Vendors (e2e)", () => {
 
   it("2. POST with duplicate code returns 409", async () => {
     await request(app.getHttpServer())
-      .post("/vendors")
+      .post("/api/v1/vendors")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "Vendor A Duplicate",
@@ -206,7 +207,7 @@ describe("Vendors (e2e)", () => {
 
   it("3. POST with invalid GSTIN returns 422", async () => {
     await request(app.getHttpServer())
-      .post("/vendors")
+      .post("/api/v1/vendors")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "Bad GSTIN Vendor",
@@ -218,7 +219,7 @@ describe("Vendors (e2e)", () => {
 
   it("4. GET /vendors returns only Org A's vendors", async () => {
     const res = await request(app.getHttpServer())
-      .get("/vendors")
+      .get("/api/v1/vendors")
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(200);
 
@@ -230,14 +231,14 @@ describe("Vendors (e2e)", () => {
 
   it("5. GET /vendors/:id cross-tenant → 404", async () => {
     await request(app.getHttpServer())
-      .get(`/vendors/${orgBVendorId}`)
+      .get(`/api/v1/vendors/${orgBVendorId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   }, 30000);
 
   it("6. PATCH cross-tenant → 404", async () => {
     await request(app.getHttpServer())
-      .patch(`/vendors/${orgBVendorId}`)
+      .patch(`/api/v1/vendors/${orgBVendorId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ name: "Hacked" })
       .expect(404);
@@ -245,14 +246,14 @@ describe("Vendors (e2e)", () => {
 
   it("7. DELETE cross-tenant → 404", async () => {
     await request(app.getHttpServer())
-      .delete(`/vendors/${orgBVendorId}`)
+      .delete(`/api/v1/vendors/${orgBVendorId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   }, 30000);
 
   it("8. Missing JWT returns 401", async () => {
     await request(app.getHttpServer())
-      .get("/vendors")
+      .get("/api/v1/vendors")
       .expect(401);
   }, 30000);
 });

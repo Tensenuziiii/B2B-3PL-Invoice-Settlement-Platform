@@ -62,6 +62,7 @@ describe("Disputes (e2e)", () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
     app.use((req: any, _res: any, next: any) => {
       const authHeader = req.headers?.authorization;
       if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
@@ -296,7 +297,7 @@ describe("Disputes (e2e)", () => {
 
     // 9. Generate Invoice via API (POST /invoices as admin A) → DRAFT
     const invRes = await request(app.getHttpServer())
-      .post("/invoices")
+      .post("/api/v1/invoices")
       .set("Authorization", `Bearer ${adminTokenA}`)
       .send({
         clientId: clientAId,
@@ -310,14 +311,14 @@ describe("Disputes (e2e)", () => {
 
     // 10. Submit (DRAFT → SUBMITTED)
     await request(app.getHttpServer())
-      .post(`/invoices/${invoiceId}/submit`)
+      .post(`/api/v1/invoices/${invoiceId}/submit`)
       .set("Authorization", `Bearer ${adminTokenA}`)
       .send({ version: 0 })
       .expect(200);
 
     // 11. Send to client (SUBMITTED → CLIENT_REVIEW)
     await request(app.getHttpServer())
-      .post(`/invoices/${invoiceId}/send-to-client`)
+      .post(`/api/v1/invoices/${invoiceId}/send-to-client`)
       .set("Authorization", `Bearer ${adminTokenA}`)
       .send({ version: 1 })
       .expect(200);
@@ -341,7 +342,7 @@ describe("Disputes (e2e)", () => {
 
   it("1. POST /disputes as CLIENT_AP user creates dispute → 201, disputeNumber matches /^DSP-\\d{6}-\\d{4}$/, status=DISPUTED", async () => {
     const res = await request(app.getHttpServer())
-      .post("/disputes")
+      .post("/api/v1/disputes")
       .set("Authorization", `Bearer ${clientTokenA}`)
       .send({
         invoiceLineId: line1Id,
@@ -363,7 +364,7 @@ describe("Disputes (e2e)", () => {
 
   it("2. POST /disputes twice on same line → 409", async () => {
     await request(app.getHttpServer())
-      .post("/disputes")
+      .post("/api/v1/disputes")
       .set("Authorization", `Bearer ${clientTokenA}`)
       .send({
         invoiceLineId: line1Id,
@@ -376,7 +377,7 @@ describe("Disputes (e2e)", () => {
 
   it("3. POST /disputes with amountPaise > line total → 400", async () => {
     await request(app.getHttpServer())
-      .post("/disputes")
+      .post("/api/v1/disputes")
       .set("Authorization", `Bearer ${clientTokenA}`)
       .send({
         invoiceLineId: line2Id,
@@ -389,7 +390,7 @@ describe("Disputes (e2e)", () => {
 
   it("4. GET /disputes as Org A returns disputes (only Org A's — includes the one we created)", async () => {
     const resA = await request(app.getHttpServer())
-      .get("/disputes")
+      .get("/api/v1/disputes")
       .set("Authorization", `Bearer ${adminTokenA}`)
       .expect(200);
 
@@ -397,7 +398,7 @@ describe("Disputes (e2e)", () => {
     expect(resA.body.data.some((d: any) => d.id === disputeId)).toBe(true);
 
     const resB = await request(app.getHttpServer())
-      .get("/disputes")
+      .get("/api/v1/disputes")
       .set("Authorization", `Bearer ${adminTokenB}`)
       .expect(200);
 
@@ -407,14 +408,14 @@ describe("Disputes (e2e)", () => {
 
   it("5. GET /disputes/:id cross-tenant (Org B trying to access Org A's dispute) → 404", async () => {
     await request(app.getHttpServer())
-      .get(`/disputes/${disputeId}`)
+      .get(`/api/v1/disputes/${disputeId}`)
       .set("Authorization", `Bearer ${adminTokenB}`)
       .expect(404);
   }, 30000);
 
   it("6. POST /disputes/:id/start-review as ACCOUNTS → status=UNDER_REVIEW, version+1", async () => {
     const res = await request(app.getHttpServer())
-      .post(`/disputes/${disputeId}/start-review`)
+      .post(`/api/v1/disputes/${disputeId}/start-review`)
       .set("Authorization", `Bearer ${accountsTokenA}`)
       .send({
         version: 0,
@@ -428,7 +429,7 @@ describe("Disputes (e2e)", () => {
 
   it("7. POST /disputes/:id/start-review with stale version → 409", async () => {
     await request(app.getHttpServer())
-      .post(`/disputes/${disputeId}/start-review`)
+      .post(`/api/v1/disputes/${disputeId}/start-review`)
       .set("Authorization", `Bearer ${accountsTokenA}`)
       .send({
         version: 0,
@@ -439,7 +440,7 @@ describe("Disputes (e2e)", () => {
 
   it("8. POST /disputes/:id/messages as CLIENT_AP → 201, message body returned", async () => {
     const res = await request(app.getHttpServer())
-      .post(`/disputes/${disputeId}/messages`)
+      .post(`/api/v1/disputes/${disputeId}/messages`)
       .set("Authorization", `Bearer ${clientTokenA}`)
       .send({
         body: "Rate was agreed at Rs 400 fixed instead of Rs 500.",
@@ -453,7 +454,7 @@ describe("Disputes (e2e)", () => {
 
   it("9. POST /disputes/:id/messages after resolve → 400", async () => {
     const d2Res = await request(app.getHttpServer())
-      .post("/disputes")
+      .post("/api/v1/disputes")
       .set("Authorization", `Bearer ${clientTokenA}`)
       .send({
         invoiceLineId: line2Id,
@@ -466,7 +467,7 @@ describe("Disputes (e2e)", () => {
     const dispute2Id = d2Res.body.id;
 
     await request(app.getHttpServer())
-      .post(`/disputes/${dispute2Id}/resolve`)
+      .post(`/api/v1/disputes/${dispute2Id}/resolve`)
       .set("Authorization", `Bearer ${accountsTokenA}`)
       .send({
         version: 0,
@@ -476,7 +477,7 @@ describe("Disputes (e2e)", () => {
       .expect(201);
 
     await request(app.getHttpServer())
-      .post(`/disputes/${dispute2Id}/messages`)
+      .post(`/api/v1/disputes/${dispute2Id}/messages`)
       .set("Authorization", `Bearer ${clientTokenA}`)
       .send({
         body: "Attempting to post to resolved dispute",
@@ -489,7 +490,7 @@ describe("Disputes (e2e)", () => {
     const beforeInvoice = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
 
     const res = await request(app.getHttpServer())
-      .post(`/disputes/${disputeId}/resolve`)
+      .post(`/api/v1/disputes/${disputeId}/resolve`)
       .set("Authorization", `Bearer ${accountsTokenA}`)
       .send({
         version: 1,

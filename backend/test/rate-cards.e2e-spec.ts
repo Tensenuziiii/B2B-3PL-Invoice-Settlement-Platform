@@ -30,6 +30,7 @@ describe("RateCards (e2e)", () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
     app.use((req: any, _res: any, next: any) => {
       const authHeader = req.headers?.authorization;
       if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
@@ -263,7 +264,7 @@ describe("RateCards (e2e)", () => {
 
   it("1. POST /rate-cards creates card with items", async () => {
     const res = await request(app.getHttpServer())
-      .post("/rate-cards")
+      .post("/api/v1/rate-cards")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "RC Org A Standard",
@@ -292,7 +293,7 @@ describe("RateCards (e2e)", () => {
 
   it("2. POST returns 400 when CLIENT type missing clientId", async () => {
     await request(app.getHttpServer())
-      .post("/rate-cards")
+      .post("/api/v1/rate-cards")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "Missing Client ID",
@@ -305,7 +306,7 @@ describe("RateCards (e2e)", () => {
 
   it("3. POST returns 400 when items empty", async () => {
     await request(app.getHttpServer())
-      .post("/rate-cards")
+      .post("/api/v1/rate-cards")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "Empty Items",
@@ -319,7 +320,7 @@ describe("RateCards (e2e)", () => {
 
   it("4. POST returns 400 when validTo <= validFrom", async () => {
     await request(app.getHttpServer())
-      .post("/rate-cards")
+      .post("/api/v1/rate-cards")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "Invalid Dates",
@@ -334,7 +335,7 @@ describe("RateCards (e2e)", () => {
 
   it("5. GET /rate-cards returns only Org A's rate cards", async () => {
     const res = await request(app.getHttpServer())
-      .get("/rate-cards")
+      .get("/api/v1/rate-cards")
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(200);
 
@@ -346,7 +347,7 @@ describe("RateCards (e2e)", () => {
 
   it("6. GET /rate-cards/:id returns card with items", async () => {
     const res = await request(app.getHttpServer())
-      .get(`/rate-cards/${orgARateCardId}`)
+      .get(`/api/v1/rate-cards/${orgARateCardId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(200);
 
@@ -357,14 +358,14 @@ describe("RateCards (e2e)", () => {
 
   it("7. GET cross-tenant → 404", async () => {
     await request(app.getHttpServer())
-      .get(`/rate-cards/${orgBRateCardId}`)
+      .get(`/api/v1/rate-cards/${orgBRateCardId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   }, 30000);
 
   it("8. PATCH cross-tenant → 404", async () => {
     await request(app.getHttpServer())
-      .patch(`/rate-cards/${orgBRateCardId}`)
+      .patch(`/api/v1/rate-cards/${orgBRateCardId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ name: "Hacked" })
       .expect(404);
@@ -372,7 +373,7 @@ describe("RateCards (e2e)", () => {
 
   it("9. POST /rate-cards/:id/items appends item", async () => {
     const res = await request(app.getHttpServer())
-      .post(`/rate-cards/${orgARateCardId}/items`)
+      .post(`/api/v1/rate-cards/${orgARateCardId}/items`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         rateType: "PER_DELIVERY",
@@ -387,7 +388,7 @@ describe("RateCards (e2e)", () => {
     expect(res.body.organizationId).toBe(orgA.id);
 
     const getRes = await request(app.getHttpServer())
-      .get(`/rate-cards/${orgARateCardId}`)
+      .get(`/api/v1/rate-cards/${orgARateCardId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(200);
 
@@ -396,14 +397,14 @@ describe("RateCards (e2e)", () => {
 
   it("10. DELETE cross-tenant → 404", async () => {
     await request(app.getHttpServer())
-      .delete(`/rate-cards/${orgBRateCardId}`)
+      .delete(`/api/v1/rate-cards/${orgBRateCardId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   }, 30000);
 
   it("11. POST /rate-cards/resolve returns the seeded METRO-STD-2026 FIXED_TRIP item", async () => {
     const res = await request(app.getHttpServer())
-      .post("/rate-cards/resolve")
+      .post("/api/v1/rate-cards/resolve")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         counterpartyType: "CLIENT",
@@ -419,7 +420,7 @@ describe("RateCards (e2e)", () => {
 
   it("12. POST /rate-cards/resolve returns 404 for a date before the card's validFrom", async () => {
     const res = await request(app.getHttpServer())
-      .post("/rate-cards/resolve")
+      .post("/api/v1/rate-cards/resolve")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         counterpartyType: "CLIENT",
@@ -435,7 +436,7 @@ describe("RateCards (e2e)", () => {
 
   it("13. POST /rate-cards/resolve returns 404 when counterparty has no cards", async () => {
     const res = await request(app.getHttpServer())
-      .post("/rate-cards/resolve")
+      .post("/api/v1/rate-cards/resolve")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         counterpartyType: "CLIENT",
@@ -451,7 +452,7 @@ describe("RateCards (e2e)", () => {
 
   it("14. POST /rate-cards/resolve route ordering — /resolve does NOT match :id", async () => {
     const res = await request(app.getHttpServer())
-      .post("/rate-cards/resolve")
+      .post("/api/v1/rate-cards/resolve")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         counterpartyType: "CLIENT",

@@ -26,6 +26,7 @@ describe("Clients (e2e)", () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
     app.use((req: any, _res: any, next: any) => {
       const authHeader = req.headers?.authorization;
       if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
@@ -171,7 +172,7 @@ describe("Clients (e2e)", () => {
 
   it("1. POST /clients creates a client for Org A", async () => {
     const res = await request(app.getHttpServer())
-      .post("/clients")
+      .post("/api/v1/clients")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "Client A",
@@ -195,7 +196,7 @@ describe("Clients (e2e)", () => {
 
   it("2. POST with duplicate code returns 409", async () => {
     await request(app.getHttpServer())
-      .post("/clients")
+      .post("/api/v1/clients")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "Client A Duplicate",
@@ -206,7 +207,7 @@ describe("Clients (e2e)", () => {
 
   it("3. POST with invalid GSTIN returns 422", async () => {
     await request(app.getHttpServer())
-      .post("/clients")
+      .post("/api/v1/clients")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         name: "Bad GSTIN Client",
@@ -218,7 +219,7 @@ describe("Clients (e2e)", () => {
 
   it("4. GET /clients returns only Org A's clients", async () => {
     const res = await request(app.getHttpServer())
-      .get("/clients")
+      .get("/api/v1/clients")
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(200);
 
@@ -230,14 +231,14 @@ describe("Clients (e2e)", () => {
 
   it("5. GET /clients/:id as Org A for Org B's client returns 404", async () => {
     await request(app.getHttpServer())
-      .get(`/clients/${orgBClientId}`)
+      .get(`/api/v1/clients/${orgBClientId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   }, 30000);
 
   it("6. PATCH /clients/:id as Org A on Org B's client returns 404", async () => {
     await request(app.getHttpServer())
-      .patch(`/clients/${orgBClientId}`)
+      .patch(`/api/v1/clients/${orgBClientId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ name: "Hacked" })
       .expect(404);
@@ -245,14 +246,14 @@ describe("Clients (e2e)", () => {
 
   it("7. DELETE /clients/:id as Org A on Org B's client returns 404", async () => {
     await request(app.getHttpServer())
-      .delete(`/clients/${orgBClientId}`)
+      .delete(`/api/v1/clients/${orgBClientId}`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(404);
   }, 30000);
 
   it("8. Missing JWT returns 401", async () => {
     await request(app.getHttpServer())
-      .get("/clients")
+      .get("/api/v1/clients")
       .expect(401);
   }, 30000);
 });

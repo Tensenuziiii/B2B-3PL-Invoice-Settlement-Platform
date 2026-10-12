@@ -52,6 +52,7 @@ describe("Payments (e2e)", () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
     app.use((req: any, _res: any, next: any) => {
       const authHeader = req.headers?.authorization;
       if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
@@ -223,7 +224,7 @@ describe("Payments (e2e)", () => {
 
     // 4. Generate invoice → submit → send-to-client → approve (moves to APPROVED)
     const invRes = await request(app.getHttpServer())
-      .post("/invoices")
+      .post("/api/v1/invoices")
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         clientId: clientAId,
@@ -236,19 +237,19 @@ describe("Payments (e2e)", () => {
     invoiceId = invRes.body.id;
 
     await request(app.getHttpServer())
-      .post(`/invoices/${invoiceId}/submit`)
+      .post(`/api/v1/invoices/${invoiceId}/submit`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 0 })
       .expect(200);
 
     await request(app.getHttpServer())
-      .post(`/invoices/${invoiceId}/send-to-client`)
+      .post(`/api/v1/invoices/${invoiceId}/send-to-client`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 1 })
       .expect(200);
 
     await request(app.getHttpServer())
-      .post(`/invoices/${invoiceId}/approve`)
+      .post(`/api/v1/invoices/${invoiceId}/approve`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({ version: 2 })
       .expect(200);
@@ -287,7 +288,7 @@ describe("Payments (e2e)", () => {
 
   it("1. POST /invoices/:id/payments as Org A records a partial payment → 200, invoice status becomes PAYMENT_QUEUED", async () => {
     const res = await request(app.getHttpServer())
-      .post(`/invoices/${invoiceId}/payments`)
+      .post(`/api/v1/invoices/${invoiceId}/payments`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         amount: 20000,
@@ -309,7 +310,7 @@ describe("Payments (e2e)", () => {
 
   it("2. POST /invoices/:id/payments records second payment completing the invoice → status PAID", async () => {
     const res = await request(app.getHttpServer())
-      .post(`/invoices/${invoiceId}/payments`)
+      .post(`/api/v1/invoices/${invoiceId}/payments`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         amount: 39000,
@@ -328,7 +329,7 @@ describe("Payments (e2e)", () => {
 
   it("3. POST /invoices/:id/payments with amount=0 → 400", async () => {
     await request(app.getHttpServer())
-      .post(`/invoices/${invoiceId}/payments`)
+      .post(`/api/v1/invoices/${invoiceId}/payments`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         amount: 0,
@@ -339,7 +340,7 @@ describe("Payments (e2e)", () => {
 
   it("4. POST /invoices/:id/payments on Org B's invoice (as Org A) → 404", async () => {
     await request(app.getHttpServer())
-      .post(`/invoices/${orgBInvoiceId}/payments`)
+      .post(`/api/v1/invoices/${orgBInvoiceId}/payments`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .send({
         amount: 10000,
@@ -350,7 +351,7 @@ describe("Payments (e2e)", () => {
 
   it("5. GET /invoices/:id/payments returns list of payments", async () => {
     const res = await request(app.getHttpServer())
-      .get(`/invoices/${invoiceId}/payments`)
+      .get(`/api/v1/invoices/${invoiceId}/payments`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(200);
 
@@ -374,7 +375,7 @@ describe("Payments (e2e)", () => {
     });
 
     const res = await request(app.getHttpServer())
-      .post(`/invoices/${freshInv.id}/mark-paid`)
+      .post(`/api/v1/invoices/${freshInv.id}/mark-paid`)
       .set("Authorization", `Bearer ${orgA.token}`)
       .expect(200);
 
