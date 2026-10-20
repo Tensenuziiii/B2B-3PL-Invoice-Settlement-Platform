@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Receipt,
   FileText,
@@ -29,6 +30,7 @@ import {
   Calendar,
   Layers,
   Sparkles,
+  LogOut,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -68,6 +70,7 @@ import { Label } from "@/components/ui/label";
 
 import { apiClient, ApiError } from "@/lib/api/client";
 import type { Trip, Invoice, Paginated } from "@/lib/api/types";
+import { getDisplayName, formatRupees, formatNumber, formatDate, paiseToRupees, logoutUser } from "@/lib/api/utils";
 
 // Types
 interface CreditNote {
@@ -81,6 +84,7 @@ interface CreditNote {
 }
 
 export default function LogisticsAccountsBilling() {
+  const router = useRouter();
   const [activeMenu, setActiveMenu] = useState("Unbilled Trips");
   const [activeTab, setActiveTab] = useState("pending-billing");
   const [searchQuery, setSearchQuery] = useState("");
@@ -141,7 +145,7 @@ export default function LogisticsAccountsBilling() {
     if (invoices.length > 0 && !creditNoteInvoiceNo) {
       const firstOpen = invoices.find((inv) => String(inv.status ?? "").toUpperCase() !== "PAID");
       if (firstOpen) {
-        setCreditNoteInvoiceNo(String(firstOpen.invoiceNumber ?? firstOpen.invoiceNo ?? firstOpen.id ?? ""));
+        setCreditNoteInvoiceNo(String(firstOpen.invoiceNumber ?? firstOpen.id ?? ""));
       }
     }
   }, [invoices, creditNoteInvoiceNo]);
@@ -149,7 +153,7 @@ export default function LogisticsAccountsBilling() {
   // Dynamic GST rate: read from the most recent invoice's gst_rate if available, else 18 as fallback
   const gstRate = useMemo(() => {
     if (invoices.length > 0) {
-      const raw = invoices[0].gst_rate ?? invoices[0].gstRate;
+      const raw = invoices[0].gstRate;
       if (raw !== undefined && raw !== null) {
         const num = Number(raw);
         if (!isNaN(num) && num > 0) {
@@ -166,7 +170,7 @@ export default function LogisticsAccountsBilling() {
     return unbilledTrips.filter((t) => {
       if (!q) return true;
       const id = String(t.id ?? "");
-      const client = String(t.clientName ?? t.client ?? "");
+      const client = String((t as any).clientName ?? t.client?.name ?? "");
       const lr = String(t.lrNumber ?? t.tripNumber ?? "");
       const dest = String(t.destination ?? "");
       return (
@@ -183,8 +187,8 @@ export default function LogisticsAccountsBilling() {
     const query = searchQuery.trim().toLowerCase();
     return invoices.filter((invoice) => {
       if (!query) return true;
-      const invNo = String(invoice.invoiceNumber ?? invoice.invoiceNo ?? invoice.id ?? "");
-      const client = String(invoice.clientName ?? invoice.client ?? "");
+      const invNo = String(invoice.invoiceNumber ?? invoice.id ?? "");
+      const client = String((invoice as any).clientName ?? invoice.client?.name ?? "");
       const status = String(invoice.status ?? "");
       return `${invNo} ${client} ${status}`.toLowerCase().includes(query);
     });
@@ -201,9 +205,9 @@ export default function LogisticsAccountsBilling() {
   // Financial aggregates
   const unbilledTotal = useMemo(() => {
     return unbilledTrips.reduce((total, trip) => {
-      const freight = Number(trip.amount ?? trip.baseFreight ?? trip.freightCharge ?? 0);
-      const toll = Number(trip.tollCharge ?? 0);
-      const dem = Number(trip.demurrageCharge ?? 0);
+      const freight = Number((trip as any).amount ?? (trip as any).baseFreight ?? (trip as any).freightCharge ?? 0);
+      const toll = Number((trip as any).tollCharge ?? 0);
+      const dem = Number((trip as any).demurrageCharge ?? 0);
       return total + freight + toll + dem;
     }, 0);
   }, [unbilledTrips]);
@@ -214,7 +218,7 @@ export default function LogisticsAccountsBilling() {
 
   const openArTotal = useMemo(() => {
     return openArInvoices.reduce((total, invoice) => {
-      return total + Number(invoice.totalAmount ?? invoice.total ?? 0);
+      return total + Number(invoice.total ?? 0);
     }, 0);
   }, [openArInvoices]);
 
@@ -224,7 +228,7 @@ export default function LogisticsAccountsBilling() {
 
   const overdueArTotal = useMemo(() => {
     return overdueArInvoices.reduce((total, invoice) => {
-      return total + Number(invoice.totalAmount ?? invoice.total ?? 0);
+      return total + Number(invoice.total ?? 0);
     }, 0);
   }, [overdueArInvoices]);
 
@@ -240,9 +244,9 @@ export default function LogisticsAccountsBilling() {
   // Financial Calculations for Selection
   const selectedSubtotal = useMemo(() => {
     return selectedTripsList.reduce((sum, trip) => {
-      const freight = Number(trip.amount ?? trip.baseFreight ?? trip.freightCharge ?? 0);
-      const toll = Number(trip.tollCharge ?? 0);
-      const dem = Number(trip.demurrageCharge ?? 0);
+      const freight = Number((trip as any).amount ?? (trip as any).baseFreight ?? (trip as any).freightCharge ?? 0);
+      const toll = Number((trip as any).tollCharge ?? 0);
+      const dem = Number((trip as any).demurrageCharge ?? 0);
       return sum + freight + toll + dem;
     }, 0);
   }, [selectedTripsList]);
@@ -281,14 +285,13 @@ export default function LogisticsAccountsBilling() {
       const firstTrip = selectedTripsList[0];
       const clientId = String(
         firstTrip?.clientId ??
-        firstTrip?.client_id ??
-        firstTrip?.client ??
+        firstTrip?.client?.id ??
         "CLT-DEFAULT"
       );
 
       const todayStr = new Date().toISOString().split("T")[0];
       const dates = selectedTripsList
-        .map((t) => String(t.deliveryDate ?? t.delivery_date ?? t.date ?? t.createdAt ?? ""))
+        .map((t) => String(t.deliveredAt ?? t.createdAt ?? ""))
         .filter(Boolean)
         .map((d) => new Date(d))
         .filter((d) => !isNaN(d.getTime()))
@@ -304,7 +307,7 @@ export default function LogisticsAccountsBilling() {
 
       setNotice({
         type: "success",
-        message: `Invoice ${res.invoiceNumber} successfully generated! Total: ₹${Number(res.total ?? 0).toLocaleString("en-IN")}.`,
+        message: `Invoice ${res.invoiceNumber} successfully generated! Total: ${formatRupees(res.total)}.`,
       });
       setSelectedTripIds([]);
       setIsInvoiceModalOpen(false);
@@ -325,17 +328,17 @@ export default function LogisticsAccountsBilling() {
 
   const handleCreateCreditNote = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const invoice = invoices.find((item) => String(item.invoiceNumber ?? item.invoiceNo ?? item.id) === creditNoteInvoiceNo);
+    const invoice = invoices.find((item) => String(item.invoiceNumber ?? item.id) === creditNoteInvoiceNo);
     const amount = Number(creditNoteAmount);
-    const totalAmount = Number(invoice?.totalAmount ?? invoice?.total ?? 0);
+    const totalAmount = Number(invoice?.total ?? 0);
     if (!invoice || String(invoice.status ?? "").toUpperCase() === "PAID" || !Number.isFinite(amount) || amount <= 0 || amount > totalAmount) {
       return;
     }
 
     const note: CreditNote = {
       noteNo: `CN-${String(creditNotes.length + 1).padStart(4, "0")}`,
-      invoiceNo: String(invoice.invoiceNumber ?? invoice.invoiceNo ?? invoice.id),
-      clientName: String(invoice.clientName ?? invoice.client ?? "—"),
+      invoiceNo: String(invoice.invoiceNumber ?? invoice.id),
+      clientName: String((invoice as any).clientName ?? invoice.client?.name ?? "—"),
       issueDate: new Date().toLocaleDateString("en-GB", {
         day: "2-digit",
         month: "short",
@@ -480,6 +483,16 @@ export default function LogisticsAccountsBilling() {
               </span>
               <ExternalLink className="h-3 w-3 text-slate-400" />
             </Link>
+            <button
+              type="button"
+              onClick={() => logoutUser(router)}
+              className="w-full flex items-center justify-between text-xs text-red-600 hover:text-red-700 p-1.5 rounded hover:bg-red-50 transition-colors font-medium cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5">
+                <LogOut className="h-3.5 w-3.5" />
+                Log Out
+              </span>
+            </button>
           </div>
         </div>
       </aside>
@@ -508,18 +521,27 @@ export default function LogisticsAccountsBilling() {
               className="bg-slate-50 border-slate-200 text-slate-700 font-mono text-xs px-2.5 py-1 flex items-center gap-1.5"
             >
               <span className="text-slate-500 font-sans">Outstanding AR:</span>
-              <span className="font-bold text-slate-900">₹{openArTotal.toLocaleString("en-IN")}</span>
+              <span className="font-bold text-slate-900">{formatRupees(openArTotal)}</span>
               <span className="text-slate-300">|</span>
               <span className="text-red-600 font-sans">Overdue:</span>
-              <span className="font-bold text-red-600">₹{overdueArTotal.toLocaleString("en-IN")}</span>
+              <span className="font-bold text-red-600">{formatRupees(overdueArTotal)}</span>
               <span className="text-slate-300">|</span>
               <span className="text-emerald-700 font-sans">Ready to Bill:</span>
-              <span className="font-bold text-emerald-700">₹{unbilledTotal.toLocaleString("en-IN")}</span>
+              <span className="font-bold text-emerald-700">{formatRupees(unbilledTotal)}</span>
             </Badge>
 
             <span className="text-xs text-slate-500 font-mono">
               GST Cycle: Oct 2026
             </span>
+
+            <button
+              type="button"
+              onClick={() => logoutUser(router)}
+              className="flex items-center gap-1.5 rounded border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Log Out
+            </button>
           </div>
         </header>
 
@@ -580,33 +602,33 @@ export default function LogisticsAccountsBilling() {
           {/* DASHBOARD VIEW */}
           {activeMenu === "Dashboard" && (
             <div className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
                 {[
-                  { label: "Unbilled Trips", value: unbilledTrips.length.toString(), meta: `₹${unbilledTotal.toLocaleString("en-IN")} ready to bill`, icon: Receipt },
-                  { label: "Open Receivables", value: `₹${openArTotal.toLocaleString("en-IN")}`, meta: `${openArInvoices.length} open invoices`, icon: FileText },
-                  { label: "Overdue Invoices", value: overdueArInvoices.length.toString(), meta: `₹${overdueArTotal.toLocaleString("en-IN")} outstanding`, icon: Clock },
+                  { label: "Unbilled Trips", value: unbilledTrips.length.toString(), meta: `${formatRupees(unbilledTotal)} ready to bill`, icon: Receipt },
+                  { label: "Open Receivables", value: formatRupees(openArTotal), meta: `${openArInvoices.length} open invoices`, icon: FileText },
+                  { label: "Overdue Invoices", value: overdueArInvoices.length.toString(), meta: `${formatRupees(overdueArTotal)} outstanding`, icon: Clock },
                   { label: "Generated Invoices", value: invoices.length.toString(), meta: `${paidInvoices.length} paid`, icon: CheckCircle2 },
                 ].map((item) => {
                   const Icon = item.icon;
                   return (
-                    <Card key={item.label} className="shadow-none border-slate-200 bg-white">
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between text-xs text-slate-600">
+                    <Card key={item.label} className="border border-slate-200 bg-white shadow-md">
+                      <CardContent className="p-6">
+                        <div className="flex items-center justify-between text-sm font-semibold text-slate-500">
                           <span>{item.label}</span>
-                          <Icon className="h-4 w-4 text-blue-600" />
+                          <Icon className="h-5 w-5 text-royal" />
                         </div>
-                        <div className="mt-2 text-xl font-bold text-slate-900">{item.value}</div>
-                        <div className="mt-1 text-[11px] text-slate-500">{item.meta}</div>
+                        <div className="mt-3 text-4xl font-bold leading-none text-void">{item.value}</div>
+                        <div className="mt-2 text-xs text-slate-400">{item.meta}</div>
                       </CardContent>
                     </Card>
                   );
                 })}
               </div>
 
-              <Card className="shadow-none border-slate-200 bg-white">
-                <CardHeader className="p-4 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
+              <Card className="border border-slate-200 bg-white shadow-md">
+                <CardHeader className="p-6 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
                   <div>
-                    <CardTitle className="text-sm font-semibold text-slate-900">Recent Accounts Receivable</CardTitle>
+                    <CardTitle className="text-base font-bold text-void">Recent Accounts Receivable</CardTitle>
                     <CardDescription className="mt-0.5 text-xs text-slate-500">Latest generated invoices and collection status.</CardDescription>
                   </div>
                   <Button
@@ -617,7 +639,7 @@ export default function LogisticsAccountsBilling() {
                       setActiveMenu("Invoices & AR");
                       setActiveTab("ar-invoices");
                     }}
-                    className="h-7 text-xs border-slate-300"
+                    className="h-9 text-xs border-slate-300 font-semibold"
                   >
                     Open AR Ledger
                   </Button>
@@ -626,53 +648,52 @@ export default function LogisticsAccountsBilling() {
                   <Table>
                     <TableHeader className="bg-slate-50/75">
                       <TableRow className="border-b border-slate-200">
-                        <TableHead className="py-2.5 text-xs font-semibold text-slate-600">Invoice</TableHead>
-                        <TableHead className="py-2.5 text-xs font-semibold text-slate-600">Client</TableHead>
-                        <TableHead className="py-2.5 text-xs font-semibold text-slate-600">Due Date</TableHead>
-                        <TableHead className="py-2.5 text-right text-xs font-semibold text-slate-600">Total</TableHead>
-                        <TableHead className="py-2.5 text-center text-xs font-semibold text-slate-600">Status</TableHead>
+                        <TableHead className="py-3 text-xs font-semibold text-slate-600">Invoice</TableHead>
+                        <TableHead className="py-3 text-xs font-semibold text-slate-600">Client</TableHead>
+                        <TableHead className="py-3 text-xs font-semibold text-slate-600">Due Date</TableHead>
+                        <TableHead className="py-3 text-right text-xs font-semibold text-slate-600">Total</TableHead>
+                        <TableHead className="py-3 text-center text-xs font-semibold text-slate-600">Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {loading ? (
                         <TableRow>
-                          <TableCell colSpan={5} className="py-8 text-center text-xs text-slate-500">
+                          <TableCell colSpan={5} className="py-8 text-center text-sm text-slate-500">
                             Loading invoices...
                           </TableCell>
                         </TableRow>
                       ) : invoices.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={5} className="py-8 text-center text-xs text-slate-500">
+                          <TableCell colSpan={5} className="py-8 text-center text-sm text-slate-500">
                             No invoices generated yet.
                           </TableCell>
                         </TableRow>
                       ) : (
                         invoices.slice(0, 4).map((invoice) => {
-                          const invNo = String(invoice.invoiceNumber ?? invoice.invoiceNo ?? invoice.id ?? "—");
-                          const clientName = String(invoice.clientName ?? invoice.client ?? "—");
+                          const invNo = String(invoice.invoiceNumber ?? invoice.id ?? "—");
+                          const clientName = getDisplayName(invoice.client, (invoice as any).clientName ?? "—");
                           const dueDate = String(invoice.dueDate ?? "—");
-                          const total = Number(invoice.totalAmount ?? invoice.total ?? 0);
+                          const total = Number(invoice.total ?? 0);
                           const status = String(invoice.status ?? "PENDING");
                           const isPaid = status.toUpperCase() === "PAID";
                           const isOverdue = status.toUpperCase() === "OVERDUE";
 
                           return (
-                            <TableRow key={invNo} className="border-b border-slate-200 text-xs">
-                              <TableCell className="py-2.5 font-mono font-bold text-slate-900">{invNo}</TableCell>
-                              <TableCell className="py-2.5 text-slate-700">{clientName}</TableCell>
-                              <TableCell className="py-2.5 font-mono text-slate-600">{dueDate}</TableCell>
-                              <TableCell className="py-2.5 text-right font-mono font-bold text-slate-900">
-                                ₹{total.toLocaleString("en-IN")}
+                            <TableRow key={invNo} className="border-b border-slate-200 text-sm">
+                              <TableCell className="py-3 font-mono font-bold text-void">{invNo}</TableCell>
+                              <TableCell className="py-3 font-medium text-slate-800">{clientName}</TableCell>
+                              <TableCell className="py-3 font-mono text-slate-600">{dueDate}</TableCell>
+                              <TableCell className="py-3 text-right font-mono font-bold text-void">
+                                {formatRupees(total)}
                               </TableCell>
-                              <TableCell className="py-2.5 text-center">
+                              <TableCell className="py-3 text-center">
                                 <Badge
-                                  variant="outline"
                                   className={
                                     isPaid
-                                      ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                                      ? "bg-turquoise text-void font-bold border-transparent"
                                       : isOverdue
-                                      ? "bg-red-50 text-red-700 border-red-300"
-                                      : "bg-amber-50 text-amber-700 border-amber-300"
+                                      ? "bg-magenta text-white font-bold border-transparent"
+                                      : "bg-slate-200 text-void font-semibold border-transparent"
                                   }
                                 >
                                   {status}
@@ -708,11 +729,11 @@ export default function LogisticsAccountsBilling() {
                         className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-900"
                       >
                         {openArInvoices.map((invoice) => {
-                          const invNo = String(invoice.invoiceNumber ?? invoice.invoiceNo ?? invoice.id);
-                          const total = Number(invoice.totalAmount ?? invoice.total ?? 0);
+                          const invNo = String(invoice.invoiceNumber ?? invoice.id);
+                          const total = Number(invoice.total ?? 0);
                           return (
                             <option key={invNo} value={invNo}>
-                              {invNo} · ₹{total.toLocaleString("en-IN")}
+                              {invNo} · {formatRupees(total)}
                             </option>
                           );
                         })}
@@ -785,7 +806,7 @@ export default function LogisticsAccountsBilling() {
                             </TableCell>
                             <TableCell className="py-2.5 text-slate-700">{note.reason}</TableCell>
                             <TableCell className="py-2.5 text-right font-mono font-bold text-slate-900">
-                              ₹{note.amount.toLocaleString("en-IN")}
+                              {formatRupees(note.amount)}
                             </TableCell>
                             <TableCell className="py-2.5 text-center">
                               <Badge
@@ -998,14 +1019,14 @@ export default function LogisticsAccountsBilling() {
                             const tripId = String(trip.id ?? "");
                             const isSelected = selectedTripIds.includes(tripId);
                             const lrNo = String(trip.lrNumber ?? trip.tripNumber ?? "—");
-                            const clientName = String(trip.clientName ?? trip.client ?? "—");
-                            const clientGstin = String(trip.clientGstin ?? trip.gstin ?? "—");
+                            const clientName = getDisplayName(trip.client, (trip as any).clientName ?? "—");
+                            const clientGstin = String((trip as any).clientGstin ?? trip.client?.gstin ?? "—");
                             const origin = String(trip.origin ?? "—");
                             const destination = String(trip.destination ?? "—");
-                            const delDate = String(trip.deliveryDate ?? trip.eta ?? trip.date ?? "—");
-                            const freightCharge = Number(trip.amount ?? trip.baseFreight ?? trip.freightCharge ?? 0);
-                            const toll = Number(trip.tollCharge ?? 0);
-                            const dem = Number(trip.demurrageCharge ?? 0);
+                            const delDate = String(trip.deliveredAt ?? trip.eta ?? trip.createdAt ?? "—");
+                            const freightCharge = Number((trip as any).amount ?? (trip as any).baseFreight ?? (trip as any).freightCharge ?? 0);
+                            const toll = Number((trip as any).tollCharge ?? 0);
+                            const dem = Number((trip as any).demurrageCharge ?? 0);
                             const accessorials = toll + dem;
                             const netAmount = freightCharge + accessorials;
 
@@ -1051,20 +1072,20 @@ export default function LogisticsAccountsBilling() {
 
                                 {/* Freight Charge */}
                                 <TableCell className="py-2.5 text-right font-mono font-medium text-slate-800">
-                                  ₹{freightCharge.toLocaleString("en-IN")}
+                                  {formatRupees(freightCharge)}
                                 </TableCell>
 
                                 {/* Additional Charges */}
                                 <TableCell className="py-2.5 text-right font-mono text-slate-700">
-                                  <div>₹{accessorials.toLocaleString("en-IN")}</div>
+                                  <div>{formatRupees(accessorials)}</div>
                                   <div className="text-[10px] text-slate-500">
-                                    Toll: ₹{toll.toLocaleString("en-IN")} • Dem: ₹{dem.toLocaleString("en-IN")}
+                                    Toll: {formatRupees(toll)} • Dem: {formatRupees(dem)}
                                   </div>
                                 </TableCell>
 
                                 {/* Total Billable */}
                                 <TableCell className="py-2.5 text-right font-mono font-bold text-slate-900">
-                                  ₹{netAmount.toLocaleString("en-IN")}
+                                  {formatRupees(netAmount)}
                                 </TableCell>
                               </TableRow>
                             );
@@ -1148,19 +1169,19 @@ export default function LogisticsAccountsBilling() {
                           </TableRow>
                         ) : (
                           filteredArInvoices.map((inv) => {
-                            const invNo = String(inv.invoiceNumber ?? inv.invoiceNo ?? inv.id ?? "—");
-                            const clientName = String(inv.clientName ?? inv.client ?? "—");
+                            const invNo = String(inv.invoiceNumber ?? inv.id ?? "—");
+                            const clientName = getDisplayName(inv.client, (inv as any).clientName ?? "—");
                             const issueDate = String(inv.issueDate ?? inv.createdAt ?? "—");
                             const dueDate = String(inv.dueDate ?? "—");
-                            const tripsCount = Array.isArray(inv.tripIds)
-                              ? inv.tripIds.length
-                              : Array.isArray(inv.trips)
-                              ? inv.trips.length
-                              : typeof inv.tripsCount === "number"
-                              ? inv.tripsCount
-                              : 1;
-                            const totalAmount = Number(inv.totalAmount ?? inv.total ?? 0);
-                            const gstAmount = Number(inv.gstAmount ?? inv.gst ?? 0);
+                            const tripsCount = Array.isArray(inv.lines)
+                              ? inv.lines.length
+                              : (Array.isArray((inv as any).trips)
+                              ? (inv as any).trips.length
+                              : typeof (inv as any).tripsCount === "number"
+                              ? (inv as any).tripsCount
+                              : 1);
+                            const totalAmount = Number(inv.total ?? 0);
+                            const gstAmount = Number(inv.gstAmount ?? 0);
                             const subtotal = typeof inv.subtotal === "number" ? inv.subtotal : totalAmount - gstAmount;
                             const status = String(inv.status ?? "PENDING");
                             const isPaid = status.toUpperCase() === "PAID";
@@ -1182,10 +1203,10 @@ export default function LogisticsAccountsBilling() {
                                   {tripsCount}
                                 </TableCell>
                                 <TableCell className="py-2.5 text-right font-mono text-slate-800">
-                                  ₹{subtotal.toLocaleString("en-IN")}
+                                  {formatRupees(subtotal)}
                                 </TableCell>
                                 <TableCell className="py-2.5 text-right font-mono font-bold text-slate-900">
-                                  ₹{totalAmount.toLocaleString("en-IN")}
+                                  {formatRupees(totalAmount)}
                                 </TableCell>
                                 <TableCell className="py-2.5 text-center">
                                   <Badge
@@ -1238,13 +1259,13 @@ export default function LogisticsAccountsBilling() {
 
                   <div className="text-xs font-mono text-slate-300 flex items-center space-x-4 border-l border-slate-700 pl-4">
                     <span>
-                      Subtotal: <strong className="text-white">₹{selectedSubtotal.toLocaleString("en-IN")}</strong>
+                      Subtotal: <strong className="text-white">{formatRupees(selectedSubtotal)}</strong>
                     </span>
                     <span>
-                      Est. GST ({gstRate}%): <strong className="text-white">₹{selectedGst.toLocaleString("en-IN")}</strong>
+                      Est. GST ({gstRate}%): <strong className="text-white">{formatRupees(selectedGst)}</strong>
                     </span>
                     <span>
-                      Grand Total: <strong className="text-emerald-400 font-bold">₹{selectedGrandTotal.toLocaleString("en-IN")}</strong>
+                      Grand Total: <strong className="text-emerald-400 font-bold">{formatRupees(selectedGrandTotal)}</strong>
                     </span>
                   </div>
                 </div>
@@ -1277,7 +1298,7 @@ export default function LogisticsAccountsBilling() {
                     className="h-8 text-xs bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 shadow-md flex items-center gap-1.5"
                   >
                     <Sparkles className="h-3.5 w-3.5" />
-                    {generating ? "Generating..." : "Generate Invoice"}
+                    {generating ? "Generating..." : "Generate Consolidated Invoice"}
                   </Button>
                 </div>
               </div>
@@ -1333,14 +1354,14 @@ export default function LogisticsAccountsBilling() {
                   Billed To (Client Consignee)
                 </span>
                 <div className="font-bold text-slate-900 text-sm">
-                  {invoiceTargetClient ? String(invoiceTargetClient.clientName ?? invoiceTargetClient.client ?? "—") : "—"}
+                  {invoiceTargetClient ? getDisplayName(invoiceTargetClient.client, (invoiceTargetClient as any).clientName ?? "—") : "—"}
                 </div>
                 <p className="text-[11px] text-slate-600 leading-tight">
-                  {invoiceTargetClient ? String(invoiceTargetClient.clientAddress ?? invoiceTargetClient.address ?? "—") : "—"}
+                  {invoiceTargetClient ? String((invoiceTargetClient as any).clientAddress ?? (invoiceTargetClient as any).address ?? "—") : "—"}
                 </p>
                 <div className="text-[11px] font-mono text-slate-600 pt-1 space-y-0.5">
-                  <div>Client GSTIN: <span className="font-bold text-slate-800">{invoiceTargetClient ? String(invoiceTargetClient.clientGstin ?? invoiceTargetClient.gstin ?? "—") : "—"}</span></div>
-                  <div>Payment Terms: <span className="font-bold text-slate-800">{invoiceTargetClient ? String(invoiceTargetClient.paymentTerms ?? "Net 30 Days") : "—"}</span></div>
+                  <div>Client GSTIN: <span className="font-bold text-slate-800">{invoiceTargetClient ? String((invoiceTargetClient as any).clientGstin ?? invoiceTargetClient.client?.gstin ?? "—") : "—"}</span></div>
+                  <div>Payment Terms: <span className="font-bold text-slate-800">{invoiceTargetClient ? String((invoiceTargetClient as any).paymentTerms ?? "Net 30 Days") : "—"}</span></div>
                   <div>Place of Supply: —</div>
                 </div>
               </div>
@@ -1375,9 +1396,9 @@ export default function LogisticsAccountsBilling() {
                       const lrNumber = String(t.lrNumber ?? t.tripNumber ?? "—");
                       const origin = String(t.origin ?? "—");
                       const destination = String(t.destination ?? "—");
-                      const freight = Number(t.amount ?? t.baseFreight ?? t.freightCharge ?? 0);
-                      const toll = Number(t.tollCharge ?? 0);
-                      const dem = Number(t.demurrageCharge ?? 0);
+                      const freight = Number((t as any).amount ?? (t as any).baseFreight ?? (t as any).freightCharge ?? 0);
+                      const toll = Number((t as any).tollCharge ?? 0);
+                      const dem = Number((t as any).demurrageCharge ?? 0);
                       const lineTotal = freight + toll + dem;
 
                       return (
@@ -1390,16 +1411,16 @@ export default function LogisticsAccountsBilling() {
                             {origin} → {destination}
                           </TableCell>
                           <TableCell className="py-2 text-right">
-                            {freight.toLocaleString("en-IN")}
+                            {formatRupees(freight)}
                           </TableCell>
                           <TableCell className="py-2 text-right text-slate-600">
-                            {toll.toLocaleString("en-IN")}
+                            {formatRupees(toll)}
                           </TableCell>
                           <TableCell className="py-2 text-right text-slate-600">
-                            {dem.toLocaleString("en-IN")}
+                            {formatRupees(dem)}
                           </TableCell>
                           <TableCell className="py-2 text-right font-bold text-slate-900">
-                            {lineTotal.toLocaleString("en-IN")}
+                            {formatRupees(lineTotal)}
                           </TableCell>
                         </TableRow>
                       );
@@ -1427,26 +1448,26 @@ export default function LogisticsAccountsBilling() {
                 <div className="flex items-center justify-between text-xs text-slate-600">
                   <span>Taxable Subtotal Value:</span>
                   <span className="font-mono font-medium text-slate-800">
-                    ₹{selectedSubtotal.toLocaleString("en-IN")}
+                    {formatRupees(selectedSubtotal)}
                   </span>
                 </div>
 
                 <div className="flex items-center justify-between text-xs text-slate-600">
                   <span>IGST @ {gstRate}% (Inter-state Freight):</span>
                   <span className="font-mono font-medium text-slate-800">
-                    ₹{selectedGst.toLocaleString("en-IN")}
+                    {formatRupees(selectedGst)}
                   </span>
                 </div>
 
                 <div className="flex items-center justify-between text-sm font-bold text-slate-900 pt-2 border-t border-slate-200">
                   <span>Invoice Grand Total:</span>
                   <span className="font-mono text-base text-blue-700">
-                    ₹{selectedGrandTotal.toLocaleString("en-IN")}
+                    {formatRupees(selectedGrandTotal)}
                   </span>
                 </div>
 
                 <p className="text-[10px] text-slate-600 italic text-right font-sans">
-                  Total in words: Indian Rupees {Math.round(selectedGrandTotal).toLocaleString("en-IN")} Only
+                  Total in words: Indian Rupees {formatNumber(paiseToRupees(selectedGrandTotal))} Only
                 </p>
               </div>
             </div>

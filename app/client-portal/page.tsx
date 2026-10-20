@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Inbox,
   CreditCard,
@@ -27,6 +28,7 @@ import {
   ArrowRight,
   Truck,
   RotateCcw,
+  LogOut,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -60,6 +62,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { apiClient, ApiError } from "@/lib/api/client";
 import type { Invoice, Paginated } from "@/lib/api/types";
+import { getDisplayName, formatRupees, formatDate, logoutUser } from "@/lib/api/utils";
 
 interface DisputeMessage {
   id: string;
@@ -75,6 +78,7 @@ interface DisputeThread {
 }
 
 export default function ClientAccountsPayablePortal() {
+  const router = useRouter();
   const [activeMenu, setActiveMenu] = useState("Invoice Inbox");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -163,7 +167,7 @@ export default function ClientAccountsPayablePortal() {
   // Selected Invoice Object
   const selectedInvoice = useMemo(() => {
     if (!selectedInvoiceId) return null;
-    return invoices.find((inv) => String(inv.id ?? inv.invoiceNumber ?? inv.invoiceNo) === selectedInvoiceId) ?? null;
+    return invoices.find((inv) => String(inv.id ?? inv.invoiceNumber) === selectedInvoiceId) ?? null;
   }, [invoices, selectedInvoiceId]);
 
   // Computed Financial Metrics
@@ -181,7 +185,7 @@ export default function ClientAccountsPayablePortal() {
     return invoices.reduce((sum, inv) => {
       const status = String(inv.status ?? "").trim().toUpperCase().replace(/\s+/g, "_");
       if (outstandingStatuses.has(status)) {
-        const amt = Number(inv.total ?? inv.grossAmount ?? inv.totalAmount ?? 0);
+        const amt = Number(inv.total ?? 0);
         return sum + amt;
       }
       return sum;
@@ -195,19 +199,19 @@ export default function ClientAccountsPayablePortal() {
     let sum = 0;
 
     for (const inv of invoices) {
-      const rawDate = inv.dueDate ?? inv.due_date;
+      const rawDate = inv.dueDate;
       if (rawDate && typeof rawDate === "string") {
         const d = new Date(rawDate);
         if (!isNaN(d.getTime())) {
           hasValidDueDate = true;
           if (d >= now && d <= next7Days) {
-            sum += Number(inv.total ?? inv.grossAmount ?? inv.totalAmount ?? 0);
+            sum += Number(inv.total ?? 0);
           }
         }
       }
     }
 
-    return hasValidDueDate ? `₹${sum.toLocaleString("en-IN")}` : "—";
+    return hasValidDueDate ? formatRupees(sum) : "—";
   }, [invoices]);
 
   // Filtered Invoices
@@ -215,8 +219,8 @@ export default function ClientAccountsPayablePortal() {
     const q = searchQuery.trim().toLowerCase();
     return invoices.filter((inv) => {
       if (!q) return true;
-      const invNo = String(inv.invoiceNumber ?? inv.invoiceNo ?? inv.id ?? "");
-      const vendor = String(inv.vendorName ?? inv.vendor ?? "");
+      const invNo = String(inv.invoiceNumber ?? inv.id ?? "");
+      const vendor = String((inv as any).vendorName ?? (inv as any).vendor ?? inv.client?.name ?? "");
       const status = String(inv.status ?? "");
       return (
         invNo.toLowerCase().includes(q) ||
@@ -232,8 +236,8 @@ export default function ClientAccountsPayablePortal() {
       const isPaid = String(inv.status ?? "").toUpperCase() === "PAID";
       if (!isPaid) return false;
       if (!q) return true;
-      const invNo = String(inv.invoiceNumber ?? inv.invoiceNo ?? inv.id ?? "");
-      const vendor = String(inv.vendorName ?? inv.vendor ?? "");
+      const invNo = String(inv.invoiceNumber ?? inv.id ?? "");
+      const vendor = String((inv as any).vendorName ?? (inv as any).vendor ?? inv.client?.name ?? "");
       return invNo.toLowerCase().includes(q) || vendor.toLowerCase().includes(q);
     });
   }, [invoices, searchQuery]);
@@ -245,8 +249,8 @@ export default function ClientAccountsPayablePortal() {
       const isDisputed = status.includes("DISPUT");
       if (!isDisputed) return false;
       if (!q) return true;
-      const invNo = String(inv.invoiceNumber ?? inv.invoiceNo ?? inv.id ?? "");
-      const vendor = String(inv.vendorName ?? inv.vendor ?? "");
+      const invNo = String(inv.invoiceNumber ?? inv.id ?? "");
+      const vendor = String((inv as any).vendorName ?? (inv as any).vendor ?? inv.client?.name ?? "");
       return invNo.toLowerCase().includes(q) || vendor.toLowerCase().includes(q);
     });
   }, [invoices, searchQuery]);
@@ -267,7 +271,7 @@ export default function ClientAccountsPayablePortal() {
   }, [invoiceItems]);
 
   const selectedGrossAmount = useMemo(() => {
-    return Number(selectedInvoice?.total ?? selectedInvoice?.grossAmount ?? selectedInvoice?.totalAmount ?? 0);
+    return Number(selectedInvoice?.total ?? 0);
   }, [selectedInvoice]);
 
   const netPayableAuthorized = useMemo(() => {
@@ -276,7 +280,7 @@ export default function ClientAccountsPayablePortal() {
 
   // Open Deep-Dive Modal
   const handleOpenInvoiceModal = (inv: Invoice, disputeTripId?: string) => {
-    const invId = String(inv.id ?? inv.invoiceNumber ?? inv.invoiceNo ?? "");
+    const invId = String(inv.id ?? inv.invoiceNumber ?? "");
     setSelectedInvoiceId(invId);
     setActiveDisputeTripId(disputeTripId ?? null);
     setActiveDisputeThread(null);
@@ -416,7 +420,7 @@ export default function ClientAccountsPayablePortal() {
   // Status renderer (Rule 10)
   const renderStatusBadge = (inv: Invoice) => {
     const rawStatus = String(inv.status ?? "PENDING_APPROVAL");
-    const invId = String(inv.id ?? inv.invoiceNumber ?? inv.invoiceNo ?? "");
+    const invId = String(inv.id ?? inv.invoiceNumber ?? "");
     let displayStatus = rawStatus;
 
     if (rawStatus === "DISPUTED") {
@@ -436,38 +440,36 @@ export default function ClientAccountsPayablePortal() {
     }
 
     const badgeClass =
-      displayStatus === "Approved"
-        ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+      displayStatus === "Approved" || displayStatus === "Paid"
+        ? "bg-turquoise text-void font-bold border-0"
         : displayStatus === "Partially Disputed" || displayStatus === "Disputed"
-        ? "bg-amber-50 text-amber-800 border-amber-300"
-        : displayStatus === "Paid"
-        ? "bg-blue-50 text-blue-700 border-blue-300"
+        ? "bg-magenta/20 text-magenta font-bold border border-magenta/40"
         : displayStatus === "Overdue"
-        ? "bg-red-50 text-red-700 border-red-300"
-        : "bg-slate-100 text-slate-800 border-slate-300";
+        ? "bg-magenta text-white font-bold border-0"
+        : "bg-royal/10 text-royal font-bold border border-royal/30";
 
     return (
-      <Badge variant="outline" className={`text-[11px] font-semibold px-2 py-0.5 rounded ${badgeClass}`}>
+      <Badge variant="outline" className={`text-xs font-semibold px-3 py-1 rounded-md ${badgeClass}`}>
         {displayStatus}
       </Badge>
     );
   };
 
   return (
-    <div className="flex h-screen w-full bg-slate-100 text-slate-800 font-sans antialiased overflow-hidden">
+    <div className="flex h-screen w-full bg-platinum text-void font-sans antialiased overflow-hidden">
       {/* 1. LEFT SIDEBAR */}
-      <aside className="w-64 flex-shrink-0 flex flex-col border-r border-slate-200 bg-white shadow-xs">
+      <aside className="w-64 flex-shrink-0 flex flex-col border-r border-void/20 bg-void text-platinum shadow-md">
         {/* Client Brand Logo Header */}
-        <div className="h-16 border-b border-slate-200 px-5 flex items-center justify-between bg-white">
-          <div className="flex items-center space-x-2.5">
-            <div className="h-8 w-8 rounded-lg bg-yellow-400 text-blue-900 flex items-center justify-center font-black text-xs shadow-xs border border-yellow-500">
+        <div className="h-16 border-b border-white/10 px-6 flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="h-8 w-8 rounded-lg bg-royal text-white flex items-center justify-center font-black text-sm shadow-md">
               M
             </div>
             <div>
-              <span className="font-extrabold text-sm tracking-tight text-slate-900 block leading-tight">
+              <span className="font-extrabold text-sm tracking-tight text-white block leading-tight">
                 METRO CASH & CARRY
               </span>
-              <span className="text-[10px] uppercase font-mono tracking-wider text-blue-700 font-bold block">
+              <span className="text-[10px] uppercase font-mono tracking-wider text-turquoise font-bold block">
                 CLIENT AP PORTAL
               </span>
             </div>
@@ -475,25 +477,25 @@ export default function ClientAccountsPayablePortal() {
         </div>
 
         {/* Client Identity & Account Badge */}
-        <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+        <div className="px-5 py-3.5 bg-white/5 border-b border-white/10">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <div className="h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-emerald-100" />
-              <span className="text-xs font-semibold text-slate-800">
+              <div className="h-2.5 w-2.5 rounded-full bg-turquoise ring-2 ring-turquoise/30" />
+              <span className="text-xs font-bold text-white">
                 Metro Wholesale India
               </span>
             </div>
-            <span className="text-[10px] font-mono text-slate-600 bg-white px-1.5 py-0.5 rounded border border-slate-200 font-bold">
+            <span className="text-[10px] font-mono text-turquoise bg-turquoise/10 px-2 py-0.5 rounded border border-turquoise/30 font-bold">
               AP-IND-01
             </span>
           </div>
-          <p className="text-[11px] text-slate-600 mt-1 truncate">
+          <p className="text-xs text-slate-400 mt-1 truncate">
             Finance & Vendor Settlements Desk
           </p>
         </div>
 
         {/* Navigation Menu */}
-        <nav className="flex-1 px-3 py-4 space-y-1">
+        <nav className="flex-1 px-4 py-5 space-y-1.5 overflow-y-auto">
           {[
             { name: "Invoice Inbox", icon: Inbox, count: `${pendingInvoiceCount} Pending` },
             { name: "Payment History", icon: CreditCard, count: `${paidInvoices.length} Settled` },
@@ -515,20 +517,20 @@ export default function ClientAccountsPayablePortal() {
                   setSearchQuery("");
                 }}
                 aria-current={isActive ? "page" : undefined}
-                className={`w-full flex items-center space-x-3 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+                className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${
                   isActive
-                    ? "bg-slate-900 text-white shadow-xs"
-                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                    ? "bg-royal text-white shadow-md"
+                    : "text-slate-300 hover:text-white hover:bg-white/10"
                 }`}
               >
-                <Icon className={`h-4 w-4 ${isActive ? "text-white" : "text-slate-500"}`} />
+                <Icon className={`h-4 w-4 ${isActive ? "text-white" : "text-slate-400"}`} />
                 <span>{item.name}</span>
                 {item.count && (
                   <span
-                    className={`ml-auto text-[10px] font-mono px-1.5 py-0.2 rounded font-semibold ${
+                    className={`ml-auto text-xs font-mono px-2 py-0.5 rounded font-semibold ${
                       isActive
-                        ? "bg-slate-800 text-slate-200"
-                        : "bg-slate-200 text-slate-700"
+                        ? "bg-white/20 text-white"
+                        : "bg-white/10 text-slate-300"
                     }`}
                   >
                     {item.count}
@@ -540,64 +542,76 @@ export default function ClientAccountsPayablePortal() {
         </nav>
 
         {/* Switcher to Internal Logistics Tools */}
-        <div className="p-3 border-t border-slate-200 bg-slate-50">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 px-1 mb-1.5 block">
+        <div className="p-4 border-t border-white/10 bg-white/5">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1 mb-2 block">
             Internal Platform Roles
           </span>
-          <div className="space-y-1">
+          <div className="space-y-1.5 text-sm">
             <Link
               href="/dispatch"
-              className="flex items-center justify-between text-xs text-slate-600 hover:text-slate-900 p-1.5 rounded hover:bg-white transition-colors"
+              className="flex items-center justify-between text-slate-300 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors"
             >
-              <span className="flex items-center gap-1.5 font-medium">
-                <Truck className="h-3.5 w-3.5 text-slate-500" />
+              <span className="flex items-center gap-2 font-medium">
+                <Truck className="h-4 w-4 text-turquoise" />
                 Dispatch Ops
               </span>
-              <ExternalLink className="h-3 w-3 text-slate-400" />
+              <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
             </Link>
             <Link
               href="/audit"
-              className="flex items-center justify-between text-xs text-slate-600 hover:text-slate-900 p-1.5 rounded hover:bg-white transition-colors"
+              className="flex items-center justify-between text-slate-300 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors"
             >
-              <span className="flex items-center gap-1.5 font-medium">
-                <ShieldCheck className="h-3.5 w-3.5 text-indigo-600" />
+              <span className="flex items-center gap-2 font-medium">
+                <ShieldCheck className="h-4 w-4 text-turquoise" />
                 Internal Audit
               </span>
-              <ExternalLink className="h-3 w-3 text-slate-400" />
+              <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
             </Link>
             <Link
               href="/accounts"
-              className="flex items-center justify-between text-xs text-slate-600 hover:text-slate-900 p-1.5 rounded hover:bg-white transition-colors"
+              className="flex items-center justify-between text-slate-300 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors"
             >
-              <span className="flex items-center gap-1.5 font-medium">
-                <FileText className="h-3.5 w-3.5 text-emerald-600" />
+              <span className="flex items-center gap-2 font-medium">
+                <FileText className="h-4 w-4 text-turquoise" />
                 Accounts & Billing
               </span>
-              <ExternalLink className="h-3 w-3 text-slate-400" />
+              <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
             </Link>
           </div>
+        </div>
+
+        {/* Log Out Button */}
+        <div className="p-4 border-t border-white/10 bg-white/5">
+          <button
+            type="button"
+            onClick={() => logoutUser(router)}
+            className="w-full flex items-center justify-center space-x-2 px-4 py-2.5 rounded-lg text-sm font-bold text-magenta hover:bg-magenta/10 border border-magenta/30 transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+            <span>Log Out</span>
+          </button>
         </div>
       </aside>
 
       {/* RIGHT MAIN WORKSPACE */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-platinum text-void">
         {/* 2. TOP HEADER */}
-        <header className="h-16 border-b border-slate-200 bg-white px-6 flex items-center justify-between gap-4 flex-shrink-0">
+        <header className="h-20 border-b border-slate-200 bg-white px-8 flex items-center justify-between gap-4 flex-shrink-0">
           <div className="flex items-center space-x-4">
             <div>
-              <h2 className="text-sm font-bold text-slate-900 leading-tight">
+              <h2 className="text-xl font-bold text-void leading-tight">
                 Welcome, Metro Finance Team
               </h2>
-              <span className="text-[11px] text-slate-500">
-                Logistics Vendor Clearing Account: <strong className="text-slate-700">Vecto Logistics India</strong>
+              <span className="text-xs text-slate-500">
+                Logistics Vendor Clearing Account: <strong className="text-void">Vecto Logistics India</strong>
               </span>
             </div>
           </div>
 
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-4">
             {/* Search Input */}
-            <div className="relative w-64">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+            <div className="relative w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <Input
                 type="text"
                 placeholder={
@@ -610,21 +624,31 @@ export default function ClientAccountsPayablePortal() {
                 disabled={activeMenu === "Vendor Settings"}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-8 pl-8 text-xs bg-slate-50 border-slate-200"
+                className="h-11 pl-10 text-sm bg-white border-slate-300 focus-visible:ring-royal"
               />
             </div>
 
             {/* Metric Pill */}
             <Badge
               variant="outline"
-              className="bg-slate-50 border-slate-200 text-slate-700 font-mono text-xs px-3 py-1 flex items-center gap-1.5"
+              className="bg-platinum border-slate-300 text-void font-mono text-sm px-4 py-2 flex items-center gap-2"
             >
               <span className="text-slate-500 font-sans">Total Outstanding:</span>
-              <span className="font-bold text-slate-900">₹{totalOutstanding.toLocaleString("en-IN")}</span>
+              <span className="font-bold text-void">{formatRupees(totalOutstanding)}</span>
               <span className="text-slate-300">|</span>
-              <span className="text-amber-600 font-sans">Due This Week:</span>
-              <span className="font-bold text-amber-700">{dueThisWeek}</span>
+              <span className="text-magenta font-sans">Due This Week:</span>
+              <span className="font-bold text-magenta">{dueThisWeek}</span>
             </Badge>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => logoutUser(router)}
+              className="h-11 px-6 text-sm border-magenta text-magenta hover:bg-magenta/10 font-bold"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Log Out
+            </Button>
           </div>
         </header>
 
@@ -741,11 +765,11 @@ export default function ClientAccountsPayablePortal() {
                       </TableRow>
                     ) : (
                       filteredInvoices.map((inv) => {
-                        const invNo = String(inv.invoiceNumber ?? inv.invoiceNo ?? inv.id ?? "—");
-                        const vendor = String(inv.vendorName ?? inv.vendor ?? "—");
-                        const issueDate = String(inv.issueDate ?? inv.createdAt ?? inv.date ?? "—");
-                        const dueDate = String(inv.dueDate ?? "—");
-                        const total = Number(inv.total ?? inv.grossAmount ?? inv.totalAmount ?? 0);
+                        const invNo = String(inv.invoiceNumber ?? inv.id ?? "—");
+                        const vendor = getDisplayName((inv as any).vendorName ?? (inv as any).vendor ?? inv.client);
+                        const issueDate = formatDate(inv.issueDate ?? inv.createdAt);
+                        const dueDate = formatDate(inv.dueDate);
+                        const total = Number(inv.total ?? 0);
 
                         return (
                           <TableRow key={invNo} className="border-b border-slate-200 text-xs hover:bg-slate-50/70 transition-colors">
@@ -769,7 +793,7 @@ export default function ClientAccountsPayablePortal() {
 
                             {/* Total Amount */}
                             <TableCell className="py-3 text-right font-mono font-bold text-slate-900 text-sm">
-                              ₹{total.toLocaleString("en-IN")}
+                              {formatRupees(total)}
                             </TableCell>
 
                             {/* Status Badge */}
@@ -826,10 +850,10 @@ export default function ClientAccountsPayablePortal() {
                   <TableBody>
                     {paidInvoices.length ? (
                       paidInvoices.map((invoice) => {
-                        const invNo = String(invoice.invoiceNumber ?? invoice.invoiceNo ?? invoice.id ?? "—");
-                        const vendor = String(invoice.vendorName ?? invoice.vendor ?? "—");
-                        const issueDate = String(invoice.issueDate ?? invoice.createdAt ?? invoice.date ?? "—");
-                        const total = Number(invoice.total ?? invoice.grossAmount ?? invoice.totalAmount ?? 0);
+                        const invNo = String(invoice.invoiceNumber ?? invoice.id ?? "—");
+                        const vendor = getDisplayName((invoice as any).vendorName ?? (invoice as any).vendor ?? invoice.client);
+                        const issueDate = formatDate(invoice.issueDate ?? invoice.createdAt);
+                        const total = Number(invoice.total ?? 0);
 
                         return (
                           <TableRow key={invNo} className="border-b border-slate-200 text-xs">
@@ -837,7 +861,7 @@ export default function ClientAccountsPayablePortal() {
                             <TableCell className="py-3 text-slate-700">{vendor}</TableCell>
                             <TableCell className="py-3 font-mono text-slate-700">{issueDate}</TableCell>
                             <TableCell className="py-3 text-right font-mono font-bold text-slate-900">
-                              ₹{total.toLocaleString("en-IN")}
+                              {formatRupees(total)}
                             </TableCell>
                             <TableCell className="py-3 text-center">
                               <Badge className="border border-emerald-300 bg-emerald-50 text-emerald-700">Paid</Badge>
@@ -886,10 +910,10 @@ export default function ClientAccountsPayablePortal() {
                   <TableBody>
                     {disputedInvoices.length ? (
                       disputedInvoices.map((inv) => {
-                        const invNo = String(inv.invoiceNumber ?? inv.invoiceNo ?? inv.id ?? "—");
-                        const vendor = String(inv.vendorName ?? inv.vendor ?? "—");
+                        const invNo = String(inv.invoiceNumber ?? inv.id ?? "—");
+                        const vendor = getDisplayName((inv as any).vendorName ?? (inv as any).vendor ?? inv.client);
                         const status = String(inv.status ?? "DISPUTED");
-                        const total = Number(inv.total ?? inv.grossAmount ?? inv.totalAmount ?? 0);
+                        const total = Number(inv.total ?? 0);
 
                         return (
                           <TableRow key={invNo} className="border-b border-slate-200 text-xs">
@@ -897,7 +921,7 @@ export default function ClientAccountsPayablePortal() {
                             <TableCell className="py-3 text-slate-700">{vendor}</TableCell>
                             <TableCell className="py-3">{renderStatusBadge(inv)}</TableCell>
                             <TableCell className="py-3 text-right font-mono font-bold text-red-600">
-                              ₹{total.toLocaleString("en-IN")}
+                              {formatRupees(total)}
                             </TableCell>
                             <TableCell className="py-3 text-right">
                               <Button
@@ -940,13 +964,13 @@ export default function ClientAccountsPayablePortal() {
                   <div>
                     <span className="block text-[10px] font-semibold uppercase text-slate-500">Vendor</span>
                     <span className="mt-1 block text-sm font-semibold text-slate-900">
-                      {String(selectedInvoice?.vendorName ?? selectedInvoice?.vendor ?? "Vecto Logistics India Pvt Ltd")}
+                      {String((selectedInvoice as any)?.vendorName ?? (selectedInvoice as any)?.vendor ?? selectedInvoice?.client?.name ?? "Vecto Logistics India Pvt Ltd")}
                     </span>
                   </div>
                   <div>
                     <span className="block text-[10px] font-semibold uppercase text-slate-500">GSTIN</span>
                     <span className="mt-1 block font-mono text-sm text-slate-800">
-                      {String(selectedInvoice?.vendorGstin ?? selectedInvoice?.gstin ?? "—")}
+                      {String((selectedInvoice as any)?.vendorGstin ?? (selectedInvoice as any)?.gstin ?? selectedInvoice?.client?.gstin ?? "—")}
                     </span>
                   </div>
                   <div>
@@ -1017,19 +1041,19 @@ export default function ClientAccountsPayablePortal() {
             <div>
               <div className="flex items-center space-x-2">
                 <DialogTitle className="text-base font-bold text-slate-900">
-                  Invoice {String(selectedInvoice?.invoiceNumber ?? selectedInvoice?.invoiceNo ?? selectedInvoice?.id ?? "—")} Summary
+                  Invoice {String(selectedInvoice?.invoiceNumber ?? selectedInvoice?.id ?? "—")} Summary
                 </DialogTitle>
                 {selectedInvoice && renderStatusBadge(selectedInvoice)}
               </div>
               <DialogDescription className="text-xs text-slate-500 mt-0.5">
-                Vendor: {String(selectedInvoice?.vendorName ?? selectedInvoice?.vendor ?? "—")} • GSTIN: {String(selectedInvoice?.vendorGstin ?? selectedInvoice?.gstin ?? "—")}
+                Vendor: {getDisplayName((selectedInvoice as any)?.vendorName ?? (selectedInvoice as any)?.vendor ?? selectedInvoice?.client)} • GSTIN: {String((selectedInvoice as any)?.vendorGstin ?? (selectedInvoice as any)?.gstin ?? selectedInvoice?.client?.gstin ?? "—")}
               </DialogDescription>
             </div>
 
             <div className="text-right">
               <span className="text-[11px] text-slate-500 block">Total Invoice Value:</span>
               <span className="text-lg font-bold font-mono text-slate-900">
-                ₹{selectedGrossAmount.toLocaleString("en-IN")}
+                {formatRupees(selectedGrossAmount)}
               </span>
             </div>
           </DialogHeader>
@@ -1042,7 +1066,7 @@ export default function ClientAccountsPayablePortal() {
                 <div className="flex items-center space-x-2">
                   <AlertOctagon className="h-4 w-4 text-amber-600 flex-shrink-0" />
                   <span>
-                    <strong>Dispute Applied:</strong> ₹{totalDeductions.toLocaleString("en-IN")} has been flagged for dispute adjustment. Net authorized payment adjusted.
+                    <strong>Dispute Applied:</strong> {formatRupees(totalDeductions)} has been flagged for dispute adjustment. Net authorized payment adjusted.
                   </span>
                 </div>
                 <Badge className="bg-amber-200 text-amber-900 font-mono text-[10px]">
@@ -1115,10 +1139,10 @@ export default function ClientAccountsPayablePortal() {
 
                               {/* Line Total */}
                               <TableCell className="py-2.5 text-right font-mono font-bold text-slate-900">
-                                ₹{totalAmount.toLocaleString("en-IN")}
+                                {formatRupees(totalAmount)}
                                 {isDisputed && disputeAmount > 0 && (
                                   <span className="block text-[10px] text-red-600 font-normal">
-                                    - ₹{disputeAmount.toLocaleString("en-IN")} Disputed
+                                    - {formatRupees(disputeAmount)} Disputed
                                   </span>
                                 )}
                               </TableCell>
@@ -1164,7 +1188,7 @@ export default function ClientAccountsPayablePortal() {
                                         {isDisputed ? "Dispute Details" : "Flag Dispute"} on {tripId} ({route})
                                       </span>
                                       <span className="text-[11px] text-slate-500">
-                                        Line Total: ₹{totalAmount.toLocaleString("en-IN")}
+                                        Line Total: {formatRupees(totalAmount)}
                                       </span>
                                     </div>
 
@@ -1314,21 +1338,21 @@ export default function ClientAccountsPayablePortal() {
               <div>
                 <span className="text-slate-500 font-sans block text-[11px]">Gross Invoice Amount</span>
                 <span className="font-bold text-slate-800">
-                  ₹{selectedGrossAmount.toLocaleString("en-IN")}
+                  {formatRupees(selectedGrossAmount)}
                 </span>
               </div>
 
               <div className="text-center">
                 <span className="text-slate-500 font-sans block text-[11px]">Disputed Deductions</span>
                 <span className="font-bold text-red-600">
-                  - ₹{totalDeductions.toLocaleString("en-IN")}
+                  - {formatRupees(totalDeductions)}
                 </span>
               </div>
 
               <div className="text-right">
                 <span className="text-slate-500 font-sans block text-[11px]">Authorized Net Payable</span>
                 <span className="text-base font-bold text-emerald-700">
-                  ₹{netPayableAuthorized.toLocaleString("en-IN")}
+                  {formatRupees(netPayableAuthorized)}
                 </span>
               </div>
             </div>
@@ -1370,7 +1394,7 @@ export default function ClientAccountsPayablePortal() {
               {approving
                 ? "Approving..."
                 : totalDeductions > 0
-                ? `Approve with Deductions (₹${netPayableAuthorized.toLocaleString("en-IN")})`
+                ? `Approve with Deductions (${formatRupees(netPayableAuthorized)})`
                 : "Approve Invoice for Payment"}
             </Button>
           </DialogFooter>

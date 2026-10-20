@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Search,
   Eye,
@@ -13,6 +14,7 @@ import {
   Layers,
   Receipt,
   RotateCcw,
+  LogOut,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -44,8 +46,10 @@ import {
 
 import { apiClient, ApiError } from "@/lib/api/client";
 import type { Settlement, Paginated } from "@/lib/api/types";
+import { getDisplayName, formatRupees, formatDate, logoutUser } from "@/lib/api/utils";
 
 export default function VendorPortalPage() {
+  const router = useRouter();
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
@@ -104,7 +108,7 @@ export default function VendorPortalPage() {
     return settlements.reduce((sum, item) => {
       const status = String(item.status ?? "").toUpperCase();
       if (status === "PENDING" || status === "APPROVED") {
-        const amt = Number(item.amount ?? item.subtotal ?? item.totalAmount ?? item.total ?? 0);
+        const amt = Number(item.total ?? item.subtotal ?? 0);
         return sum + amt;
       }
       return sum;
@@ -116,10 +120,12 @@ export default function VendorPortalPage() {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return settlements;
     return settlements.filter((item) => {
-      const settlementNo = String(item.settlementNumber ?? item.settlementNo ?? item.id ?? "").toLowerCase();
+      const settlementNo = String(item.settlementNumber ?? item.id ?? "").toLowerCase();
       const status = String(item.status ?? "").toLowerCase();
-      const period = String(item.period ?? "").toLowerCase();
-      const vendor = String(item.vendor ?? "").toLowerCase();
+      const period = String(
+        item.periodStart && item.periodEnd ? `${item.periodStart} – ${item.periodEnd}` : ""
+      ).toLowerCase();
+      const vendor = String(item.vendor?.name ?? "").toLowerCase();
       return (
         settlementNo.includes(q) ||
         status.includes(q) ||
@@ -131,19 +137,19 @@ export default function VendorPortalPage() {
 
   const renderStatusBadge = (statusStr: string) => {
     const s = statusStr.toUpperCase();
-    let badgeClass = "bg-slate-100 text-slate-800 border-slate-300";
+    let badgeClass = "bg-slate-200 text-void font-bold border-0";
     if (s === "APPROVED" || s === "CLEARED" || s === "PAID") {
-      badgeClass = "bg-emerald-50 text-emerald-700 border-emerald-300";
+      badgeClass = "bg-turquoise text-void font-bold border-0";
     } else if (s === "PENDING" || s === "IN_REVIEW") {
-      badgeClass = "bg-amber-50 text-amber-800 border-amber-300";
+      badgeClass = "bg-royal/10 text-royal font-bold border border-royal/30";
     } else if (s === "REJECTED" || s === "FAILED") {
-      badgeClass = "bg-red-50 text-red-700 border-red-300";
+      badgeClass = "bg-magenta/20 text-magenta font-bold border border-magenta/40";
     }
 
     return (
       <Badge
         variant="outline"
-        className={`text-[11px] font-semibold px-2 py-0.5 rounded ${badgeClass}`}
+        className={`text-xs font-semibold px-3 py-1 rounded-md ${badgeClass}`}
       >
         {s || "PENDING"}
       </Badge>
@@ -167,20 +173,20 @@ export default function VendorPortalPage() {
   }, [detail, lineItems]);
 
   return (
-    <div className="flex h-screen w-full bg-slate-100 text-slate-800 font-sans antialiased overflow-hidden">
+    <div className="flex h-screen w-full bg-platinum text-void font-sans antialiased overflow-hidden">
       {/* 1. LEFT SIDEBAR */}
-      <aside className="w-64 flex-shrink-0 flex flex-col border-r border-slate-200 bg-white shadow-xs">
+      <aside className="w-64 flex-shrink-0 flex flex-col border-r border-void/20 bg-void text-platinum shadow-md">
         {/* Vendor Branding Header */}
-        <div className="h-16 border-b border-slate-200 px-5 flex items-center justify-between bg-white">
-          <div className="flex items-center space-x-2.5">
-            <div className="h-8 w-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-black text-xs shadow-xs">
+        <div className="h-16 border-b border-white/10 px-6 flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="h-8 w-8 rounded-lg bg-royal text-white flex items-center justify-center font-black text-sm shadow-md">
               V
             </div>
             <div>
-              <span className="font-extrabold text-sm tracking-tight text-slate-900 block leading-tight">
+              <span className="font-extrabold text-sm tracking-tight text-white block leading-tight">
                 VECTO VENDOR PORTAL
               </span>
-              <span className="text-[10px] uppercase font-mono tracking-wider text-slate-500 font-bold block">
+              <span className="text-[10px] uppercase font-mono tracking-wider text-turquoise font-bold block">
                 3PL PARTNER DESK
               </span>
             </div>
@@ -188,113 +194,135 @@ export default function VendorPortalPage() {
         </div>
 
         {/* Vendor Identity Badge */}
-        <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+        <div className="px-5 py-3.5 bg-white/5 border-b border-white/10">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <div className="h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-emerald-100" />
-              <span className="text-xs font-semibold text-slate-800">
+              <div className="h-2.5 w-2.5 rounded-full bg-turquoise ring-2 ring-turquoise/30" />
+              <span className="text-xs font-bold text-white">
                 Logistics Partner Clearing
               </span>
             </div>
-            <span className="text-[10px] font-mono text-slate-600 bg-white px-1.5 py-0.5 rounded border border-slate-200 font-bold">
+            <span className="text-[10px] font-mono text-turquoise bg-turquoise/10 px-2 py-0.5 rounded border border-turquoise/30 font-bold">
               3PL-REM
             </span>
           </div>
-          <p className="text-[11px] text-slate-600 mt-1 truncate">
+          <p className="text-xs text-slate-400 mt-1 truncate">
             Freight Settlements & Remittances
           </p>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-3 py-4 space-y-1">
+        <nav className="flex-1 px-4 py-5 space-y-1.5 overflow-y-auto">
           <button
             type="button"
-            className="w-full flex items-center space-x-3 px-3 py-2 rounded-md text-xs font-medium bg-slate-900 text-white shadow-xs transition-colors"
+            className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-semibold bg-royal text-white shadow-md transition-colors"
           >
-            <Receipt className="h-4 w-4 text-white" />
+            <Receipt className="h-5 w-5 text-white" />
             <span>Settlement Ledger</span>
-            <span className="ml-auto text-[10px] font-mono px-1.5 py-0.2 rounded font-semibold bg-slate-800 text-slate-200">
+            <span className="ml-auto text-xs font-mono px-2 py-0.5 rounded font-semibold bg-white/20 text-white">
               {settlements.length}
             </span>
           </button>
         </nav>
 
         {/* Internal Role Switchers */}
-        <div className="p-3 border-t border-slate-200 bg-slate-50">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 px-1 mb-1.5 block">
+        <div className="p-4 border-t border-white/10 bg-white/5">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1 mb-2 block">
             Internal Platform Roles
           </span>
-          <div className="space-y-1">
+          <div className="space-y-1.5 text-sm">
             <Link
               href="/dispatch"
-              className="flex items-center justify-between text-xs text-slate-600 hover:text-slate-900 p-1.5 rounded hover:bg-white transition-colors"
+              className="flex items-center justify-between text-slate-300 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors"
             >
-              <span className="flex items-center gap-1.5 font-medium">
-                <Truck className="h-3.5 w-3.5 text-slate-500" />
+              <span className="flex items-center gap-2 font-medium">
+                <Truck className="h-4 w-4 text-turquoise" />
                 Dispatch Ops
               </span>
-              <ExternalLink className="h-3 w-3 text-slate-400" />
+              <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
             </Link>
             <Link
               href="/audit"
-              className="flex items-center justify-between text-xs text-slate-600 hover:text-slate-900 p-1.5 rounded hover:bg-white transition-colors"
+              className="flex items-center justify-between text-slate-300 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors"
             >
-              <span className="flex items-center gap-1.5 font-medium">
-                <ShieldCheck className="h-3.5 w-3.5 text-indigo-600" />
+              <span className="flex items-center gap-2 font-medium">
+                <ShieldCheck className="h-4 w-4 text-turquoise" />
                 Internal Audit
               </span>
-              <ExternalLink className="h-3 w-3 text-slate-400" />
+              <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
             </Link>
             <Link
               href="/accounts"
-              className="flex items-center justify-between text-xs text-slate-600 hover:text-slate-900 p-1.5 rounded hover:bg-white transition-colors"
+              className="flex items-center justify-between text-slate-300 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors"
             >
-              <span className="flex items-center gap-1.5 font-medium">
-                <FileText className="h-3.5 w-3.5 text-emerald-600" />
+              <span className="flex items-center gap-2 font-medium">
+                <FileText className="h-4 w-4 text-turquoise" />
                 Accounts & Billing
               </span>
-              <ExternalLink className="h-3 w-3 text-slate-400" />
+              <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
             </Link>
           </div>
+        </div>
+
+        {/* Log Out Button */}
+        <div className="p-4 border-t border-white/10 bg-white/5">
+          <button
+            type="button"
+            onClick={() => logoutUser(router)}
+            className="w-full flex items-center justify-center space-x-2 px-4 py-2.5 rounded-lg text-sm font-bold text-magenta hover:bg-magenta/10 border border-magenta/30 transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+            <span>Log Out</span>
+          </button>
         </div>
       </aside>
 
       {/* RIGHT MAIN WORKSPACE */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-platinum text-void">
         {/* TOP HEADER */}
-        <header className="h-16 border-b border-slate-200 bg-white px-6 flex items-center justify-between gap-4 flex-shrink-0">
+        <header className="h-20 border-b border-slate-200 bg-white px-8 flex items-center justify-between gap-4 flex-shrink-0">
           <div>
-            <h1 className="text-base font-bold text-slate-900 leading-tight">
+            <h1 className="text-xl font-bold text-void leading-tight">
               Vendor Settlement Portal
             </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-slate-500 mt-1">
               Review freight payout remittances, trip itemization, and settlement reconciliation.
             </p>
           </div>
 
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-4">
             {/* Search Input */}
-            <div className="relative w-64">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+            <div className="relative w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <Input
                 type="text"
                 placeholder="Search settlements..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-8 pl-8 text-xs bg-slate-50 border-slate-200"
+                className="h-11 pl-10 text-sm bg-white border-slate-300 focus-visible:ring-royal"
               />
             </div>
 
             {/* Metric Pill: Total Outstanding */}
             <Badge
               variant="outline"
-              className="bg-slate-50 border-slate-200 text-slate-700 font-mono text-xs px-3 py-1 flex items-center gap-1.5"
+              className="bg-platinum border-slate-300 text-void font-mono text-sm px-4 py-2 flex items-center gap-2"
             >
               <span className="text-slate-500 font-sans">Total Outstanding:</span>
-              <span className="font-bold text-slate-900">
-                ₹{totalOutstanding.toLocaleString("en-IN")}
+              <span className="font-bold text-void">
+                {formatRupees(totalOutstanding)}
               </span>
             </Badge>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => logoutUser(router)}
+              className="h-11 px-6 text-sm border-magenta text-magenta hover:bg-magenta/10 font-bold"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Log Out
+            </Button>
           </div>
         </header>
 
@@ -381,25 +409,14 @@ export default function VendorPortalPage() {
                   ) : (
                     filteredSettlements.map((item, idx) => {
                       const id = String(item.id ?? `settlement-${idx}`);
-                      const settlementNo = String(
-                        item.settlementNumber ?? item.settlementNo ?? item.id ?? "—"
-                      );
+                      const settlementNo = String(item.settlementNumber ?? item.id ?? "—");
                       const period = String(
-                        item.period ??
-                          (item.periodStart && item.periodEnd
-                            ? `${item.periodStart} – ${item.periodEnd}`
-                            : item.date ?? item.createdAt ?? "—")
+                        item.periodStart && item.periodEnd
+                          ? `${item.periodStart.slice(0, 10)} – ${item.periodEnd.slice(0, 10)}`
+                          : item.createdAt?.slice(0, 10) ?? "—"
                       );
-                      const tripCount =
-                        item.tripCount ??
-                        (Array.isArray(item.trips)
-                          ? item.trips.length
-                          : Array.isArray(item.items)
-                          ? item.items.length
-                          : "—");
-                      const subtotal = Number(
-                        item.subtotal ?? item.amount ?? item.total ?? 0
-                      );
+                      const tripCount = Array.isArray(item.items) ? item.items.length : "—";
+                      const subtotal = Number(item.subtotal ?? item.total ?? 0);
                       const status = String(item.status ?? "PENDING");
 
                       return (
@@ -417,7 +434,7 @@ export default function VendorPortalPage() {
                             {String(tripCount)}
                           </TableCell>
                           <TableCell className="py-2.5 text-right font-mono font-bold text-slate-900">
-                            ₹{subtotal.toLocaleString("en-IN")}
+                            {formatRupees(subtotal)}
                           </TableCell>
                           <TableCell className="py-2.5 text-center">
                             {renderStatusBadge(status)}
@@ -515,13 +532,13 @@ export default function VendorPortalPage() {
                   <div>
                     <span className="text-slate-500 block text-[11px]">Vendor Counterparty</span>
                     <span className="font-semibold text-slate-800 truncate block">
-                      {String(detail?.vendor ?? detail?.vendorName ?? "3PL Partner")}
+                      {getDisplayName(detail?.vendor ?? detail?.vendorName, "3PL Partner")}
                     </span>
                   </div>
                   <div className="text-right">
                     <span className="text-slate-500 block text-[11px]">Total Net Remittance</span>
                     <span className="font-mono font-extrabold text-slate-900 block">
-                      ₹{detailTotal.toLocaleString("en-IN")}
+                      {formatRupees(detailTotal)}
                     </span>
                   </div>
                 </div>
@@ -579,7 +596,7 @@ export default function VendorPortalPage() {
                                   {rateType}
                                 </TableCell>
                                 <TableCell className="py-2.5 text-right font-mono font-bold text-slate-900">
-                                  ₹{amount.toLocaleString("en-IN")}
+                                  {formatRupees(amount)}
                                 </TableCell>
                               </TableRow>
                             );
@@ -596,7 +613,7 @@ export default function VendorPortalPage() {
                     Total Settled Amount
                   </span>
                   <span className="text-base font-extrabold font-mono text-slate-900">
-                    ₹{detailTotal.toLocaleString("en-IN")}
+                    {formatRupees(detailTotal)}
                   </span>
                 </div>
               </>

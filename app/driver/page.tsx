@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Truck,
   MapPin,
@@ -36,16 +37,10 @@ import { Label } from "@/components/ui/label";
 
 import { apiClient, ApiError } from "@/lib/api/client";
 import type { Trip } from "@/lib/api/types";
-
-function formatRupees(amount: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
+import { getDisplayName, formatRupees, formatDate, logoutUser } from "@/lib/api/utils";
 
 export default function DriverMobileWebApp() {
+  const router = useRouter();
   // Trip State
   const [trip, setTrip] = useState<Trip | null>(null);
   const [loading, setLoading] = useState(true);
@@ -79,12 +74,21 @@ export default function DriverMobileWebApp() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
 
+  const getExpectedCollection = (t: Trip | null): number => {
+    if (!t) return 0;
+    if (t.tripStops && t.tripStops.length > 0) {
+      return t.tripStops.reduce((sum, s) => sum + (s.expectedCollection ?? 0), 0);
+    }
+    return Number((t as any).expectedCollection) || 0;
+  };
+
   const fetchCurrentTrip = async () => {
     try {
       const res = await apiClient.get<{ data: Trip | null }>("/trips/current");
       setTrip(res.data);
-      if (res.data?.expectedCollection != null) {
-        setCashCollectedAmount(String(res.data.expectedCollection));
+      const exp = getExpectedCollection(res.data);
+      if (exp > 0) {
+        setCashCollectedAmount(String(exp));
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load current trip");
@@ -98,8 +102,9 @@ export default function DriverMobileWebApp() {
         const res = await apiClient.get<{ data: Trip | null }>("/trips/current");
         if (!cancelled) {
           setTrip(res.data);
-          if (res.data?.expectedCollection != null) {
-            setCashCollectedAmount(String(res.data.expectedCollection));
+          const exp = getExpectedCollection(res.data);
+          if (exp > 0) {
+            setCashCollectedAmount(String(exp));
           }
         }
       } catch (err) {
@@ -231,7 +236,7 @@ export default function DriverMobileWebApp() {
     tripStops.find((s) => s.status !== "COMPLETED") || tripStops[0] || null;
   const currentTripStopId = currentStop
     ? String(currentStop.id || "stop-1")
-    : String(trip?.currentStopId || trip?.stopId || "stop-1");
+    : String((trip as any)?.currentStopId || (trip as any)?.stopId || "stop-1");
 
   const upcomingStops = tripStops.filter((s) => s !== currentStop && s.status !== "COMPLETED");
 
@@ -332,6 +337,13 @@ export default function DriverMobileWebApp() {
             >
               Dispatch UI <ExternalLink className="h-3 w-3" />
             </Link>
+            <button
+              type="button"
+              onClick={() => logoutUser(router)}
+              className="text-red-400 hover:text-red-300 font-sans text-xs underline font-medium flex items-center gap-0.5 cursor-pointer"
+            >
+              Log Out
+            </button>
           </div>
         </div>
 
@@ -341,12 +353,12 @@ export default function DriverMobileWebApp() {
             <div>
               <div className="flex items-center space-x-2">
                 <h1 className="text-lg font-black tracking-tight text-white uppercase">
-                  {trip?.driver ? String(trip.driver) : "Driver On Duty"}
+                  {getDisplayName(trip?.driver, "Driver On Duty")}
                 </h1>
                 <span
-                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
                     onShift
-                      ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                      ? "bg-turquoise/25 text-turquoise border border-turquoise/40"
                       : "bg-slate-700 text-slate-400 border border-slate-600"
                   }`}
                 >
@@ -354,8 +366,8 @@ export default function DriverMobileWebApp() {
                 </span>
               </div>
               <div className="flex items-center space-x-2 mt-1">
-                <span className="bg-slate-800 text-amber-400 font-mono text-sm font-bold px-2 py-0.5 rounded border border-slate-700">
-                  {trip?.vehicle ? String(trip.vehicle) : "No Vehicle Assigned"}
+                <span className="bg-slate-800 text-turquoise font-mono text-sm font-bold px-2 py-0.5 rounded border border-slate-700">
+                  {getDisplayName(trip?.vehicle, "No Vehicle Assigned")}
                 </span>
                 {Boolean(trip?.tripNumber) && (
                   <span className="text-xs text-slate-300 font-mono">
@@ -368,13 +380,13 @@ export default function DriverMobileWebApp() {
             {/* Shift Toggle Button */}
             <button
               onClick={() => setOnShift(!onShift)}
-              className={`px-3 py-2 rounded-lg font-bold text-xs flex items-center space-x-1.5 transition-all shadow-sm ${
+              className={`px-4 py-2 rounded-lg font-bold text-xs flex items-center space-x-1.5 transition-all shadow-sm ${
                 onShift
-                  ? "bg-red-600 hover:bg-red-700 text-white border border-red-500"
-                  : "bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500"
+                  ? "bg-magenta hover:bg-magenta/90 text-white border border-magenta"
+                  : "bg-turquoise hover:bg-turquoise/90 text-void border border-turquoise font-extrabold"
               }`}
             >
-              <LogOut className="h-3.5 w-3.5" />
+              <LogOut className="h-4 w-4" />
               <span>{onShift ? "End Shift" : "Start Shift"}</span>
             </button>
           </div>
@@ -485,7 +497,7 @@ export default function DriverMobileWebApp() {
                   <div className="flex items-start justify-between">
                     <div>
                       <h2 className="text-xl font-black text-slate-900 leading-snug">
-                        {String(trip.client || "Client Delivery")}
+                        {getDisplayName(trip.client, "Client Delivery")}
                       </h2>
                       <p className="text-sm font-bold text-blue-700">
                         {String(trip.destination || "Destination Facility")}
@@ -530,20 +542,18 @@ export default function DriverMobileWebApp() {
                       COD to Collect
                     </span>
                     <span className="text-sm font-black text-emerald-700">
-                      {trip.expectedCollection != null
-                        ? formatRupees(Number(trip.expectedCollection))
-                        : "₹0"}
+                      {formatRupees(getExpectedCollection(trip))}
                     </span>
                   </div>
                 </div>
 
                 {/* ACTION TRIGGER BUTTON: High-Contrast Massive Touch Target */}
-                <div className="pt-1">
+                <div className="pt-2">
                   {tripStage === "driving" ? (
                     <Button
                       type="button"
                       onClick={() => setTripStage("arrived")}
-                      className="w-full py-7 text-lg font-black uppercase tracking-wide bg-blue-700 hover:bg-blue-800 text-white rounded-xl shadow-lg border-2 border-blue-900 active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+                      className="w-full py-6 h-auto text-xl font-black uppercase tracking-wide bg-royal hover:bg-royal/90 text-white rounded-xl shadow-lg border-2 border-royal active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
                     >
                       <MapPin className="h-6 w-6 animate-bounce" />
                       Reached Destination
@@ -552,9 +562,9 @@ export default function DriverMobileWebApp() {
                     <Button
                       type="button"
                       onClick={() => setIsPodModalOpen(true)}
-                      className="w-full py-7 text-lg font-black uppercase tracking-wide bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-lg border-2 border-emerald-800 active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+                      className="w-full py-6 h-auto text-xl font-black uppercase tracking-wide bg-turquoise hover:bg-turquoise/90 text-void rounded-xl shadow-lg border-2 border-turquoise active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
                     >
-                      <CheckCircle2 className="h-6 w-6" />
+                      <CheckCircle2 className="h-6 w-6 text-void" />
                       Complete Delivery & POD
                     </Button>
                   )}
@@ -587,7 +597,7 @@ export default function DriverMobileWebApp() {
                         STOP #{stop.sequence ? String(stop.sequence) : index + 2}
                       </Badge>
                       <span className="text-xs font-bold text-slate-900">
-                        {String(stop.client || stop.locationName || "Next Delivery Point")}
+                        {getDisplayName(stop.client, (typeof stop.locationName === "string" && stop.locationName) || "Next Delivery Point")}
                       </span>
                     </div>
                     <p className="text-xs text-slate-600">
@@ -657,7 +667,7 @@ export default function DriverMobileWebApp() {
                   </DialogTitle>
                   <DialogDescription className="text-xs text-slate-300 mt-0.5">
                     {trip
-                      ? `${String(trip.client || "Client")} (${String(trip.tripNumber || trip.id)})`
+                      ? `${getDisplayName(trip.client, "Client")} (${String(trip.tripNumber || trip.id)})`
                       : "Delivery Settlement"}
                   </DialogDescription>
                 </div>
@@ -876,9 +886,7 @@ export default function DriverMobileWebApp() {
                     <span>Exact Cash / Remittance Amount</span>
                     <span className="text-slate-500 font-mono">
                       Expected:{" "}
-                      {trip?.expectedCollection != null
-                        ? formatRupees(Number(trip.expectedCollection))
-                        : "₹0"}
+                      {formatRupees(getExpectedCollection(trip))}
                     </span>
                   </div>
                   <div className="relative">
@@ -897,17 +905,17 @@ export default function DriverMobileWebApp() {
                 </div>
               </div>
 
-              {/* UI ELEMENT 4: Massive Green "Confirm Delivery & Submit" Button */}
+              {/* UI ELEMENT 4: Massive Turquoise "Confirm Delivery & Submit" Button */}
               <div className="pt-2">
                 <Button
                   type="submit"
                   disabled={isSubmitting || photoUploading || !hasCapturedPhoto}
-                  className="w-full py-7 text-lg font-black uppercase tracking-wide bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xl border-2 border-emerald-800 active:scale-[0.98] transition-transform flex items-center justify-center gap-2 disabled:opacity-50"
+                  className="w-full py-6 h-auto text-xl font-black uppercase tracking-wide bg-turquoise hover:bg-turquoise/90 text-void rounded-xl shadow-xl border-2 border-turquoise active:scale-[0.98] transition-transform flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  <CheckCircle2 className="h-6 w-6" />
+                  <CheckCircle2 className="h-6 w-6 text-void" />
                   {isSubmitting ? "Submitting Settlement..." : "Confirm Delivery & Submit"}
                 </Button>
-                <p className="text-[11px] text-center text-slate-600 font-medium mt-2">
+                <p className="text-xs text-center text-slate-600 font-medium mt-2">
                   Data will be instantly synced to Dispatch Desk & Accounts Audit.
                 </p>
               </div>

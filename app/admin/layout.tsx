@@ -2,7 +2,8 @@
 
 import React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { logoutUser } from "@/lib/api/utils";
 import {
   Users,
   Truck,
@@ -28,22 +29,23 @@ const NAV_ITEMS = [
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
 
   return (
-    <div className="flex h-screen w-full bg-slate-50 text-slate-800 font-sans antialiased overflow-hidden">
+    <div className="flex h-screen w-full bg-platinum text-void font-sans antialiased overflow-hidden">
       {/* 1. LEFT SIDEBAR NAVIGATION */}
-      <aside className="w-64 flex-shrink-0 flex flex-col border-r border-slate-200 bg-white">
+      <aside className="w-64 flex-shrink-0 flex flex-col border-r border-void/20 bg-void text-platinum">
         {/* Brand / Logo */}
-        <div className="h-14 border-b border-slate-200 px-5 flex items-center justify-between">
-          <div className="flex items-center space-x-2.5">
-            <div className="h-7 w-7 rounded-md bg-slate-900 flex items-center justify-center text-white font-bold text-xs shadow-xs">
-              <Truck className="h-4 w-4" />
+        <div className="h-16 border-b border-white/10 px-6 flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="h-8 w-8 rounded-lg bg-royal flex items-center justify-center text-white font-bold text-sm shadow-md">
+              <Truck className="h-5 w-5" />
             </div>
             <div>
-              <span className="font-semibold text-sm tracking-tight text-slate-900 block leading-tight">
+              <span className="font-bold text-base tracking-tight text-white block leading-tight">
                 VECTO LOGISTICS
               </span>
-              <span className="text-[10px] uppercase font-mono tracking-wider text-slate-600 block">
+              <span className="text-xs uppercase font-mono tracking-wider text-turquoise block font-semibold">
                 ADMIN MASTER DATA
               </span>
             </div>
@@ -51,25 +53,25 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
 
         {/* Admin Role Identity Tag */}
-        <div className="px-4 py-3 bg-slate-50/70 border-b border-slate-200">
+        <div className="px-5 py-4 bg-white/5 border-b border-white/10">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <div className="h-2 w-2 rounded-full bg-purple-600 ring-2 ring-purple-100" />
-              <span className="text-xs font-semibold text-slate-800">
+              <div className="h-2.5 w-2.5 rounded-full bg-turquoise ring-2 ring-turquoise/30" />
+              <span className="text-sm font-bold text-white">
                 System Administration
               </span>
             </div>
-            <span className="text-[10px] font-mono text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 font-bold">
+            <span className="text-xs font-mono text-turquoise bg-turquoise/10 px-2 py-0.5 rounded border border-turquoise/30 font-bold">
               ADM-01
             </span>
           </div>
-          <p className="text-[11px] text-slate-600 mt-1 truncate">
+          <p className="text-xs text-slate-400 mt-1 truncate">
             Enterprise Security & Master Records
           </p>
         </div>
 
         {/* Navigation Menu */}
-        <nav className="flex-1 px-3 py-4 space-y-1">
+        <nav className="flex-1 px-4 py-5 space-y-1.5 overflow-y-auto">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -77,13 +79,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <Link
                 key={item.href}
                 href={item.href}
-                className={`w-full flex items-center space-x-3 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+                className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${
                   isActive
-                    ? "bg-slate-900 text-white shadow-xs"
-                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                    ? "bg-royal text-white shadow-md"
+                    : "text-slate-300 hover:text-white hover:bg-white/10"
                 }`}
               >
-                <Icon className={`h-4 w-4 ${isActive ? "text-white" : "text-slate-500"}`} />
+                <Icon className={`h-5 w-5 ${isActive ? "text-white" : "text-slate-400"}`} />
                 <span>{item.name}</span>
               </Link>
             );
@@ -91,52 +93,53 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </nav>
 
         {/* Quick Link Switcher to Operational Roles */}
-        <div className="p-3 border-t border-slate-200 bg-slate-50/50">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-1 mb-1.5 block">
+        <div className="p-4 border-t border-white/10 bg-white/5">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1 mb-2 block">
             Operational Workspaces
           </span>
-          <div className="space-y-1 text-xs">
+          <div className="space-y-1.5 text-sm">
             <Link
               href="/dispatch"
-              className="flex items-center justify-between p-1.5 rounded hover:bg-slate-100 text-slate-600 hover:text-slate-900"
+              className="flex items-center justify-between p-2 rounded-lg hover:bg-white/10 text-slate-300 hover:text-white font-medium"
             >
-              <span className="flex items-center gap-1.5">
-                <LayoutDashboard className="h-3.5 w-3.5 text-slate-500" /> Dispatch
+              <span className="flex items-center gap-2">
+                <LayoutDashboard className="h-4 w-4 text-turquoise" /> Dispatch
               </span>
-              <ExternalLink className="h-3 w-3 text-slate-400" />
+              <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
             </Link>
             <Link
               href="/audit"
-              className="flex items-center justify-between p-1.5 rounded hover:bg-slate-100 text-slate-600 hover:text-slate-900"
+              className="flex items-center justify-between p-2 rounded-lg hover:bg-white/10 text-slate-300 hover:text-white font-medium"
             >
-              <span className="flex items-center gap-1.5">
-                <FileCheck2 className="h-3.5 w-3.5 text-indigo-600" /> Audit
+              <span className="flex items-center gap-2">
+                <FileCheck2 className="h-4 w-4 text-turquoise" /> Audit
               </span>
-              <ExternalLink className="h-3 w-3 text-slate-400" />
+              <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
             </Link>
             <Link
               href="/accounts"
-              className="flex items-center justify-between p-1.5 rounded hover:bg-slate-100 text-slate-600 hover:text-slate-900"
+              className="flex items-center justify-between p-2 rounded-lg hover:bg-white/10 text-slate-300 hover:text-white font-medium"
             >
-              <span className="flex items-center gap-1.5">
-                <Receipt className="h-3.5 w-3.5 text-emerald-600" /> Billing
+              <span className="flex items-center gap-2">
+                <Receipt className="h-4 w-4 text-turquoise" /> Billing
               </span>
-              <ExternalLink className="h-3 w-3 text-slate-400" />
+              <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
             </Link>
-            <Link
-              href="/login"
-              className="flex items-center justify-between p-1.5 rounded hover:bg-red-50 text-red-600 font-medium"
+            <button
+              type="button"
+              onClick={() => logoutUser(router)}
+              className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-magenta/10 text-magenta font-bold text-left cursor-pointer transition-colors"
             >
-              <span className="flex items-center gap-1.5">
-                <Power className="h-3.5 w-3.5" /> Log Out
+              <span className="flex items-center gap-2">
+                <Power className="h-4 w-4" /> Log Out
               </span>
-            </Link>
+            </button>
           </div>
         </div>
       </aside>
 
       {/* RIGHT MAIN WORKSPACE */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-platinum text-void">
         {children}
       </div>
     </div>

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   FileCheck2,
   AlertOctagon,
@@ -19,6 +20,7 @@ import {
   ShieldCheck,
   Smartphone,
   LayoutDashboard,
+  LogOut,
   ArrowRight,
   MapPin,
   AlertTriangle,
@@ -57,6 +59,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { apiClient, ApiError } from "@/lib/api/client";
+import { getDisplayName, formatRupees, formatNumber, formatDate, logoutUser } from "@/lib/api/utils";
 
 interface AuditSettings {
   auditSlaHours: number;
@@ -95,33 +98,27 @@ const AUDIT_TOGGLE_SETTINGS: { key: AuditToggleSetting; label: string; descripti
   { key: "notifyAccounts", label: "Notify accounts on resolution", description: "Notify billing when an audit case is resolved." },
 ];
 
-function formatRupees(amount: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
 function getExpenseAmount(detail: Record<string, unknown> | null, type: "toll" | "fuel" | "allowance"): number | null {
   if (!detail) return null;
+  const tally = detail.eodTally as Record<string, unknown> | undefined;
+  if (tally && tally[type] != null && !isNaN(Number(tally[type]))) return Number(tally[type]);
+  const tripExpenses = (detail.tripExpenses || detail.expenses) as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(tripExpenses)) {
+    const matches = tripExpenses.filter(
+      (item) => String(item.type).toLowerCase() === type.toLowerCase()
+    );
+    if (matches.length > 0) {
+      return matches.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+    }
+  }
   if (detail[type] != null && !isNaN(Number(detail[type]))) return Number(detail[type]);
   const rep = detail.reportedExpenses as Record<string, unknown> | undefined;
   if (rep && rep[type] != null && !isNaN(Number(rep[type]))) return Number(rep[type]);
-  const exp = detail.expenses;
-  if (exp && typeof exp === "object") {
-    if (Array.isArray(exp)) {
-      const match = exp.find((item: Record<string, unknown>) => String(item.type).toLowerCase() === type);
-      if (match && match.amount != null && !isNaN(Number(match.amount))) return Number(match.amount);
-    } else if (type in exp) {
-      const val = (exp as Record<string, unknown>)[type];
-      if (val != null && !isNaN(Number(val))) return Number(val);
-    }
-  }
   return null;
 }
 
 export default function InternalAuditWorkspace() {
+  const router = useRouter();
   const [activeMenu, setActiveMenu] = useState("Audit Queue");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -154,6 +151,7 @@ export default function InternalAuditWorkspace() {
 
   // Notes States
   const [auditNotes, setAuditNotes] = useState("");
+  const [notesError, setNotesError] = useState<string | null>(null);
   const [discrepancyNotes, setDiscrepancyNotes] = useState(
     "Discrepancy detected during audit verification. Consignment flagged for operational review."
   );
@@ -235,15 +233,23 @@ export default function InternalAuditWorkspace() {
   // Actions
   const handleVerifyAndApprove = async () => {
     if (!selectedTripId) return;
+    if (auditNotes.trim().length < 3) {
+      setNotesError("Please enter at least 3 characters of audit notes.");
+      return;
+    }
+    setNotesError(null);
     setActionLoading(true);
     setError(null);
     try {
+      const version = Number((tripDetail as any)?.version ?? 0);
       await apiClient.post(`/trips/${selectedTripId}/audit`, {
+        version,
         outcome: "AUDITED",
-        notes: auditNotes,
+        notes: auditNotes.trim(),
         checklist: checklist,
       });
       setActionNotice(`Trip ${selectedTripId} verified and forwarded to Billing.`);
+      setAuditNotes("");
       await refetchQueueAndSelectNext(selectedTripId);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to verify trip");
@@ -255,12 +261,18 @@ export default function InternalAuditWorkspace() {
   const handleConfirmDiscrepancy = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedTripId) return;
+    if (discrepancyNotes.trim().length < 3) {
+      setError("Please enter at least 3 characters of audit notes.");
+      return;
+    }
     setActionLoading(true);
     setError(null);
     try {
+      const version = Number((tripDetail as any)?.version ?? 0);
       await apiClient.post(`/trips/${selectedTripId}/audit`, {
+        version,
         outcome: "CORRECTION_REQUESTED",
-        notes: discrepancyNotes,
+        notes: discrepancyNotes.trim(),
         checklist,
       });
       setIsDisputeModalOpen(false);
@@ -329,55 +341,66 @@ export default function InternalAuditWorkspace() {
     : tripDetail?.id
     ? String(tripDetail.id)
     : selectedTripId || "—";
-  const vehicleRegDisplay = tripDetail?.vehicle
-    ? String(tripDetail.vehicle)
-    : tripDetail?.regNo
-    ? String(tripDetail.regNo)
-    : "—";
-  const driverNameDisplay = tripDetail?.driver
-    ? String(tripDetail.driver)
-    : tripDetail?.driverName
-    ? String(tripDetail.driverName)
-    : "—";
+  const vehicleRegDisplay = getDisplayName(
+    tripDetail?.vehicle,
+    tripDetail?.regNo ? String(tripDetail.regNo) : "—"
+  );
+  const driverNameDisplay = getDisplayName(
+    tripDetail?.driver,
+    tripDetail?.driverName ? String(tripDetail.driverName) : "—"
+  );
   const driverPhoneDisplay = tripDetail?.driverPhone
     ? String(tripDetail.driverPhone)
     : tripDetail?.phone
     ? String(tripDetail.phone)
     : "—";
-  const clientNameDisplay = tripDetail?.client
-    ? String(tripDetail.client)
-    : tripDetail?.clientName
-    ? String(tripDetail.clientName)
-    : "—";
+  const clientNameDisplay = getDisplayName(
+    tripDetail?.client,
+    tripDetail?.clientName ? String(tripDetail.clientName) : "—"
+  );
   const originDisplay = tripDetail?.origin ? String(tripDetail.origin) : "—";
   const destinationDisplay = tripDetail?.destination ? String(tripDetail.destination) : "—";
-  const departureDisplay = tripDetail?.departureTime ? String(tripDetail.departureTime) : "—";
-  const arrivalDisplay = tripDetail?.eta
-    ? String(tripDetail.eta)
+  const departureDisplay = tripDetail?.startedAt
+    ? formatDate(tripDetail.startedAt as any)
+    : tripDetail?.departureTime
+    ? formatDate(tripDetail.departureTime as any)
+    : "—";
+  const arrivalDisplay = tripDetail?.deliveredAt
+    ? formatDate(tripDetail.deliveredAt as any)
     : tripDetail?.arrivalTime
-    ? String(tripDetail.arrivalTime)
+    ? formatDate(tripDetail.arrivalTime as any)
+    : tripDetail?.eta
+    ? formatDate(tripDetail.eta as any)
     : "—";
   const invoiceNoDisplay = tripDetail?.invoiceNo
     ? String(tripDetail.invoiceNo)
     : tripDetail?.tripNumber
     ? `INV-${String(tripDetail.tripNumber)}`
     : "—";
-  const signatoryNameDisplay = tripDetail?.signatoryName
-    ? String(tripDetail.signatoryName)
-    : tripDetail?.receiverName
-    ? String(tripDetail.receiverName)
-    : "—";
+  const signatoryNameDisplay = getDisplayName(
+    tripDetail?.signatoryName,
+    getDisplayName(tripDetail?.receiverName, "—")
+  );
 
   // Odometer and Distances
-  const startOdometer = tripDetail?.startOdometer != null ? Number(tripDetail.startOdometer) : null;
+  const startOdometer =
+    tripDetail?.odometerStart != null
+      ? tripDetail.odometerStart
+      : tripDetail?.startOdometer != null
+      ? tripDetail.startOdometer
+      : null;
   const currentOdometer =
-    tripDetail?.currentOdometer != null
-      ? Number(tripDetail.currentOdometer)
+    tripDetail?.odometerEnd != null
+      ? tripDetail.odometerEnd
+      : tripDetail?.currentOdometer != null
+      ? tripDetail.currentOdometer
       : tripDetail?.endOdometer != null
-      ? Number(tripDetail.endOdometer)
+      ? tripDetail.endOdometer
       : null;
   const odometerDistance =
-    startOdometer != null && currentOdometer != null ? currentOdometer - startOdometer : null;
+    startOdometer != null && currentOdometer != null
+      ? Number(currentOdometer) - Number(startOdometer)
+      : null;
   const gpsDistance =
     tripDetail?.systemGpsDistance != null
       ? Number(tripDetail.systemGpsDistance)
@@ -390,15 +413,33 @@ export default function InternalAuditWorkspace() {
   const fuelReported = getExpenseAmount(tripDetail, "fuel");
   const allowanceReported = getExpenseAmount(tripDetail, "allowance");
 
+  const tripStops = Array.isArray(tripDetail?.tripStops)
+    ? (tripDetail.tripStops as Array<Record<string, unknown>>)
+    : [];
+  const stopsExpectedCod = tripStops.reduce(
+    (sum, stop) => sum + (Number(stop.expectedCollection) || 0),
+    0
+  );
+  const stopsActualCod = tripStops.reduce(
+    (sum, stop) => sum + (Number(stop.actualCollection) || Number(stop.collectedCash) || 0),
+    0
+  );
+
   const expectedCod =
-    tripDetail?.expectedCollection != null
+    stopsExpectedCod > 0
+      ? stopsExpectedCod
+      : tripDetail?.expectedCollection != null
       ? Number(tripDetail.expectedCollection)
       : tripDetail?.expectedCod != null
       ? Number(tripDetail.expectedCod)
       : null;
   const collectedCod =
-    tripDetail?.actualCash != null
+    stopsActualCod > 0
+      ? stopsActualCod
+      : tripDetail?.actualCash != null
       ? Number(tripDetail.actualCash)
+      : (tripDetail?.eodTally as any)?.actualCash != null
+      ? Number((tripDetail?.eodTally as any).actualCash)
       : tripDetail?.collectedCash != null
       ? Number(tripDetail.collectedCash)
       : tripDetail?.reportedCod != null
@@ -538,7 +579,7 @@ export default function InternalAuditWorkspace() {
                       </Badge>
                     </div>
                     <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                      {String(tripItem.client || tripItem.clientName || "Consignee Client")}
+                      {getDisplayName(tripItem.client, String(tripItem.clientName || "Consignee Client"))}
                     </div>
                   </button>
                 );
@@ -585,6 +626,16 @@ export default function InternalAuditWorkspace() {
               </span>
               <ExternalLink className="h-3 w-3 text-slate-400" />
             </Link>
+            <button
+              type="button"
+              onClick={() => logoutUser(router)}
+              className="w-full flex items-center justify-between text-xs text-red-600 hover:text-red-700 p-1.5 rounded hover:bg-red-50 transition-colors font-medium cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5">
+                <LogOut className="h-3.5 w-3.5" />
+                Log Out
+              </span>
+            </button>
           </div>
         </div>
       </aside>
@@ -620,6 +671,15 @@ export default function InternalAuditWorkspace() {
             <span className="text-xs text-slate-500 font-mono">
               Audit SLA: Under 2h
             </span>
+
+            <button
+              type="button"
+              onClick={() => logoutUser(router)}
+              className="flex items-center gap-1.5 rounded border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Log Out
+            </button>
           </div>
         </header>
 
@@ -800,7 +860,7 @@ export default function InternalAuditWorkspace() {
                             <Badge variant="outline" className="border-red-200 bg-red-50 text-[9px] text-red-700">Flagged</Badge>
                           </div>
                           <div className="mt-2 text-xs font-semibold text-slate-800">
-                            {String(trip.client || trip.clientName || "Consignee Client")}
+                            {getDisplayName(trip.client, String(trip.clientName || "Consignee Client"))}
                           </div>
                           <div className="mt-1 text-[10px] text-slate-500">
                             Status: {String(trip.status || "Flagged")}
@@ -829,7 +889,7 @@ export default function InternalAuditWorkspace() {
                     </CardHeader>
                     <CardContent className="space-y-4 p-4">
                       <div className="grid grid-cols-2 gap-3 text-xs">
-                        <div><span className="block text-[10px] text-slate-500">Client</span><span className="mt-1 block font-semibold text-slate-800">{String(selectedDispute.client || "—")}</span></div>
+                        <div><span className="block text-[10px] text-slate-500">Client</span><span className="mt-1 block font-semibold text-slate-800">{getDisplayName(selectedDispute.client)}</span></div>
                         <div><span className="block text-[10px] text-slate-500">Status</span><span className="mt-1 block font-mono font-semibold text-slate-800">{String(selectedDispute.status || "—")}</span></div>
                       </div>
                       <div className="flex items-start gap-2 text-[11px] text-slate-600">
@@ -1157,7 +1217,8 @@ export default function InternalAuditWorkspace() {
                         <span className="text-[11px] text-slate-600 block">Driver &amp; Vehicle:</span>
                         <span className="font-bold text-slate-900 block">{driverNameDisplay}</span>
                         <span className="text-[11px] font-mono text-slate-600">
-                          {vehicleRegDisplay} • {driverPhoneDisplay}
+                          {vehicleRegDisplay}
+                          {driverPhoneDisplay && driverPhoneDisplay !== "—" ? ` (${driverPhoneDisplay})` : ""}
                         </span>
                       </div>
 
@@ -1200,7 +1261,7 @@ export default function InternalAuditWorkspace() {
                           Start Odometer
                         </span>
                         <span className="text-sm font-black font-mono text-slate-900">
-                          {startOdometer != null ? `${startOdometer} km` : "—"}
+                          {startOdometer != null ? `${formatNumber(startOdometer as any)} km` : "—"}
                         </span>
                       </div>
 
@@ -1209,11 +1270,11 @@ export default function InternalAuditWorkspace() {
                           End / Current Odometer
                         </span>
                         <span className="text-sm font-black font-mono text-slate-900">
-                          {currentOdometer != null ? `${currentOdometer} km` : "—"}
+                          {currentOdometer != null ? `${formatNumber(currentOdometer as any)} km` : "—"}
                         </span>
                         {odometerDistance != null && (
                           <span className="text-[10px] text-emerald-600 font-mono font-medium ml-1">
-                            (Distance: {odometerDistance} km)
+                            (Distance: {formatNumber(odometerDistance)} km)
                           </span>
                         )}
                       </div>
@@ -1247,44 +1308,64 @@ export default function InternalAuditWorkspace() {
                         </TableRow>
                       </TableHeader>
                       <TableBody className="text-xs font-mono">
-                        <TableRow className="border-b border-slate-100">
-                          <TableCell className="py-2 font-sans text-slate-800">Toll Expenses</TableCell>
-                          <TableCell className="py-2 text-right">
-                            {tollReported != null ? formatRupees(tollReported) : "—"}
-                          </TableCell>
-                          <TableCell className="py-2 text-right text-slate-600">
-                            {tollReported != null ? formatRupees(tollReported) : "—"}
-                          </TableCell>
-                          <TableCell className="py-2 text-right text-emerald-600 font-medium">
-                            ₹0
-                          </TableCell>
-                        </TableRow>
+                        {Array.isArray(tripDetail?.tripExpenses) && (tripDetail.tripExpenses as any[]).length > 0 ? (
+                          (tripDetail.tripExpenses as any[]).map((exp, idx) => {
+                            const typeName = String(exp.type || "Expense")
+                              .replace(/_/g, " ")
+                              .toLowerCase()
+                              .replace(/\b\w/g, (c) => c.toUpperCase());
+                            const amt = Number(exp.amount) || 0;
+                            return (
+                              <TableRow key={exp.id || idx} className="border-b border-slate-100">
+                                <TableCell className="py-2 font-sans text-slate-800">{typeName}</TableCell>
+                                <TableCell className="py-2 text-right">{formatRupees(amt)}</TableCell>
+                                <TableCell className="py-2 text-right text-slate-600">{formatRupees(amt)}</TableCell>
+                                <TableCell className="py-2 text-right text-emerald-600 font-medium">₹0</TableCell>
+                              </TableRow>
+                            );
+                          })
+                        ) : (
+                          <>
+                            <TableRow className="border-b border-slate-100">
+                              <TableCell className="py-2 font-sans text-slate-800">Toll Expenses</TableCell>
+                              <TableCell className="py-2 text-right">
+                                {tollReported != null ? formatRupees(tollReported) : "—"}
+                              </TableCell>
+                              <TableCell className="py-2 text-right text-slate-600">
+                                {tollReported != null ? formatRupees(tollReported) : "—"}
+                              </TableCell>
+                              <TableCell className="py-2 text-right text-emerald-600 font-medium">
+                                ₹0
+                              </TableCell>
+                            </TableRow>
 
-                        <TableRow className="border-b border-slate-100">
-                          <TableCell className="py-2 font-sans text-slate-800">Fuel &amp; AdBlue</TableCell>
-                          <TableCell className="py-2 text-right">
-                            {fuelReported != null ? formatRupees(fuelReported) : "—"}
-                          </TableCell>
-                          <TableCell className="py-2 text-right text-slate-600">
-                            {fuelReported != null ? formatRupees(fuelReported) : "—"}
-                          </TableCell>
-                          <TableCell className="py-2 text-right text-emerald-600 font-medium">
-                            ₹0
-                          </TableCell>
-                        </TableRow>
+                            <TableRow className="border-b border-slate-100">
+                              <TableCell className="py-2 font-sans text-slate-800">Fuel &amp; AdBlue</TableCell>
+                              <TableCell className="py-2 text-right">
+                                {fuelReported != null ? formatRupees(fuelReported) : "—"}
+                              </TableCell>
+                              <TableCell className="py-2 text-right text-slate-600">
+                                {fuelReported != null ? formatRupees(fuelReported) : "—"}
+                              </TableCell>
+                              <TableCell className="py-2 text-right text-emerald-600 font-medium">
+                                ₹0
+                              </TableCell>
+                            </TableRow>
 
-                        <TableRow className="border-b border-slate-100">
-                          <TableCell className="py-2 font-sans text-slate-800">Driver Allowance</TableCell>
-                          <TableCell className="py-2 text-right">
-                            {allowanceReported != null ? formatRupees(allowanceReported) : "—"}
-                          </TableCell>
-                          <TableCell className="py-2 text-right text-slate-600">
-                            {allowanceReported != null ? formatRupees(allowanceReported) : "—"}
-                          </TableCell>
-                          <TableCell className="py-2 text-right text-slate-600">
-                            ₹0
-                          </TableCell>
-                        </TableRow>
+                            <TableRow className="border-b border-slate-100">
+                              <TableCell className="py-2 font-sans text-slate-800">Driver Allowance</TableCell>
+                              <TableCell className="py-2 text-right">
+                                {allowanceReported != null ? formatRupees(allowanceReported) : "—"}
+                              </TableCell>
+                              <TableCell className="py-2 text-right text-slate-600">
+                                {allowanceReported != null ? formatRupees(allowanceReported) : "—"}
+                              </TableCell>
+                              <TableCell className="py-2 text-right text-slate-600">
+                                ₹0
+                              </TableCell>
+                            </TableRow>
+                          </>
+                        )}
 
                         {/* COD / Cash Received Line */}
                         <TableRow className="border-b border-slate-200 bg-slate-50/50 font-bold">
@@ -1358,17 +1439,17 @@ export default function InternalAuditWorkspace() {
                           key={item.key}
                           type="button"
                           onClick={() => toggleCheck(item.key as keyof typeof checklist)}
-                          className={`w-full flex items-center justify-between p-2 rounded-md border text-xs text-left transition-all ${
+                          className={`w-full flex items-center justify-between p-3 rounded-lg border text-sm text-left transition-all ${
                             isChecked
-                              ? "bg-slate-50/80 border-slate-300 text-slate-900"
-                              : "bg-red-50/50 border-red-200 text-red-900"
+                              ? "bg-turquoise/20 border-turquoise/40 text-void font-semibold"
+                              : "bg-magenta/10 border-magenta/30 text-magenta font-semibold"
                           }`}
                         >
-                          <span className="font-medium pr-2">{item.label}</span>
+                          <span className="pr-2">{item.label}</span>
                           {isChecked ? (
-                            <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+                            <CheckCircle2 className="h-5 w-5 text-turquoise flex-shrink-0" />
                           ) : (
-                            <XCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                            <XCircle className="h-5 w-5 text-magenta flex-shrink-0" />
                           )}
                         </button>
                       );
@@ -1377,7 +1458,7 @@ export default function InternalAuditWorkspace() {
                 </Card>
 
                 {/* Audit Clearance Notes Input */}
-                <div className="space-y-1 mb-2">
+                <div className="space-y-1.5 mb-2">
                   <Label htmlFor="audit-notes" className="text-xs font-bold text-slate-700">
                     Audit Clearance Notes
                   </Label>
@@ -1386,23 +1467,31 @@ export default function InternalAuditWorkspace() {
                     type="text"
                     placeholder="Enter approval notes (e.g. Verified against physical dock manifest)"
                     value={auditNotes}
-                    onChange={(e) => setAuditNotes(e.target.value)}
-                    className="h-9 text-xs border-slate-300 bg-slate-50"
+                    onChange={(e) => {
+                      setAuditNotes(e.target.value);
+                      if (notesError && e.target.value.trim().length >= 3) {
+                        setNotesError(null);
+                      }
+                    }}
+                    className="h-11 text-sm border-slate-300 bg-white"
                   />
+                  {notesError && (
+                    <p className="text-xs text-magenta font-semibold mt-1">{notesError}</p>
+                  )}
                 </div>
               </ScrollArea>
 
               {/* STICKY ACTION FOOTER (Bottom of Right Pane) */}
-              <div className="p-4 border-t border-slate-200 bg-slate-50/80 flex items-center space-x-3 flex-shrink-0">
+              <div className="p-4 border-t border-slate-200 bg-white flex items-center space-x-3 flex-shrink-0">
                 {/* Red Outline Button: Raise Discrepancy */}
                 <Button
                   type="button"
                   variant="outline"
                   disabled={!selectedTripId || actionLoading}
                   onClick={() => setIsDisputeModalOpen(true)}
-                  className="flex-1 py-6 text-sm font-bold text-red-600 border-2 border-red-300 hover:bg-red-50 hover:text-red-700 hover:border-red-400 active:scale-[0.99] transition-all disabled:opacity-50"
+                  className="flex-1 py-6 h-auto text-base font-bold text-magenta border-2 border-magenta hover:bg-magenta/10 active:scale-[0.99] transition-all disabled:opacity-50"
                 >
-                  <AlertOctagon className="h-4 w-4 mr-1.5" />
+                  <AlertOctagon className="h-5 w-5 mr-1.5" />
                   Raise Discrepancy
                 </Button>
 
@@ -1411,9 +1500,9 @@ export default function InternalAuditWorkspace() {
                   type="button"
                   disabled={!selectedTripId || actionLoading}
                   onClick={handleVerifyAndApprove}
-                  className="flex-1 py-6 text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white shadow-md active:scale-[0.99] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  className="flex-1 py-6 h-auto text-base font-bold bg-royal hover:bg-royal/90 text-white shadow-md active:scale-[0.99] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
                 >
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                  <CheckCircle2 className="h-5 w-5 text-turquoise" />
                   {actionLoading ? "Processing..." : "Verify & Send to Billing"}
                 </Button>
               </div>
