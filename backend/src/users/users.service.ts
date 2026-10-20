@@ -106,7 +106,6 @@ export class UsersService {
     }
     if (dto.status !== undefined) {
       data.status = dto.status;
-      data.deletedAt = dto.status === UserStatus.INACTIVE ? new Date() : null;
       if (dto.status === UserStatus.ACTIVE) {
         data.failedLoginAttempts = 0;
         data.lockedUntil = null;
@@ -141,7 +140,7 @@ export class UsersService {
     const [user] = await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id },
-        data: { status: UserStatus.INACTIVE, deletedAt: now },
+        data: { status: UserStatus.INACTIVE },
         select: publicUserSelect,
       }),
       this.prisma.refreshToken.updateMany({

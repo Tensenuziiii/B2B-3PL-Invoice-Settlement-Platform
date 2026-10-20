@@ -58,7 +58,11 @@ export class RateCardsService {
         orderBy: { createdAt: "desc" },
         take: limit,
         skip,
-        include: { _count: { select: { items: true } } },
+        include: {
+          _count: { select: { items: true } },
+          client: { select: { id: true, name: true, code: true } },
+          vendor: { select: { id: true, name: true, code: true } },
+        },
       }),
       this.rateCard.count({ where }),
     ]);
@@ -74,7 +78,11 @@ export class RateCardsService {
         deletedAt: null,
         ...(orgId ? { organizationId: orgId } : {}),
       },
-      include: { items: { orderBy: { createdAt: "asc" } } },
+      include: {
+        items: { orderBy: { createdAt: "asc" } },
+        client: { select: { id: true, name: true, code: true } },
+        vendor: { select: { id: true, name: true, code: true } },
+      },
     });
     if (!card) throw new NotFoundException("Rate card not found.");
     return card;

@@ -2,6 +2,8 @@ import { Prisma } from "@prisma/client";
 import { tenantStorage } from "./tenant.context";
 import { SCOPED_MODELS } from "./scoped-models";
 
+const NO_TENANT_UUID = "00000000-0000-0000-0000-000000000000";
+
 const MULTI_READ_OPS = new Set([
   "findFirst", "findFirstOrThrow", "findMany",
   "count", "aggregate", "groupBy",
@@ -36,7 +38,7 @@ export const tenantExtension = Prisma.defineExtension((client) =>
           if (!orgId) {
             if (SINGLE_READ_OPS.has(operation)) return null;
             if (MULTI_READ_OPS.has(operation)) {
-              return query({ ...(args as any), where: { AND: [{ id: { equals: "__no_tenant__" } }] } });
+              return query({ ...(args as any), where: { AND: [{ id: { equals: NO_TENANT_UUID } }] } });
             }
             if (operation === "create" || operation === "createMany" || WRITE_OPS_WITH_WHERE.has(operation)) {
               throw new Error(`Tenant write without context: ${model}.${operation}`);

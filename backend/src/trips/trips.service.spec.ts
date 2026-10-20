@@ -655,4 +655,49 @@ describe("TripsService", () => {
 
     expect(result).toEqual({ data: activeTrip });
   });
+
+  it("37. list() with status=\"active\" uses in-filter for 6 operational statuses (not a raw string)", async () => {
+    const activeStatuses = [
+      "ASSIGNED",
+      "IN_PROGRESS",
+      "DELIVERY_IN_PROGRESS",
+      "DELIVERED",
+      "AUDIT_PENDING",
+      "CORRECTION_REQUESTED",
+    ];
+
+    const result = await service.list({ status: "active" });
+
+    expect(tripFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          deletedAt: null,
+          status: { in: activeStatuses },
+        }),
+      }),
+    );
+    expect(tripCount).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        deletedAt: null,
+        status: { in: activeStatuses },
+      }),
+    });
+    expect(result.data).toEqual([mockTrip]);
+    expect(result.meta).toEqual({ total: 1, limit: 50, offset: 0 });
+  });
+
+  it("38. list() with status=\"AUDITED\" filters by that exact status", async () => {
+    const result = await service.list({ status: "AUDITED" });
+
+    expect(tripFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ deletedAt: null, status: "AUDITED" }),
+      }),
+    );
+    expect(tripCount).toHaveBeenCalledWith({
+      where: expect.objectContaining({ deletedAt: null, status: "AUDITED" }),
+    });
+    expect(result.data).toEqual([mockTrip]);
+    expect(result.meta).toEqual({ total: 1, limit: 50, offset: 0 });
+  });
 });

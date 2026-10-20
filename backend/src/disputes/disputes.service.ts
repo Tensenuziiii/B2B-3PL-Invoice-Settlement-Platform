@@ -39,7 +39,21 @@ export class DisputesService {
         take: limit,
         skip,
         include: {
-          invoiceLine: { select: { id: true, invoiceId: true, tripId: true } },
+          invoiceLine: {
+            select: {
+              id: true,
+              invoiceId: true,
+              tripId: true,
+              invoice: {
+                select: {
+                  id: true,
+                  invoiceNumber: true,
+                  status: true,
+                  client: { select: { id: true, name: true, code: true } },
+                },
+              },
+            },
+          },
           messages: { orderBy: { createdAt: "desc" }, take: 1 },
         },
       }),
@@ -55,7 +69,14 @@ export class DisputesService {
       include: {
         invoiceLine: {
           include: {
-            invoice: { select: { id: true, invoiceNumber: true, status: true } },
+            invoice: {
+              select: {
+                id: true,
+                invoiceNumber: true,
+                status: true,
+                client: { select: { id: true, name: true, code: true } },
+              },
+            },
             trip: { select: { id: true, tripNumber: true } },
           },
         },

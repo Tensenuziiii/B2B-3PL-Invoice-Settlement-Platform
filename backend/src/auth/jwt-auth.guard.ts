@@ -6,13 +6,13 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UserStatus } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaRootService } from '../prisma/prisma.service';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly jwtService: JwtService,
-    private readonly prisma: PrismaService,
+    private readonly prisma: PrismaRootService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -25,7 +25,7 @@ export class JwtAuthGuard implements CanActivate {
 
     const token = authHeader.substring(7);
 
-    let payload: { sub?: string };
+    let payload: { sub?: string; orgId?: string };
     try {
       payload = this.jwtService.verify(token);
     } catch {
@@ -56,6 +56,7 @@ export class JwtAuthGuard implements CanActivate {
       role: user.role,
       displayId: user.displayId,
       hubName: user.hubName,
+      ...(payload.orgId ? { orgId: payload.orgId } : {}),
     };
     return true;
   }

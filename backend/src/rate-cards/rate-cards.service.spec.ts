@@ -58,7 +58,11 @@ describe("RateCardsService", () => {
       orderBy: { createdAt: "desc" },
       take: 50,
       skip: 0,
-      include: { _count: { select: { items: true } } },
+      include: {
+        _count: { select: { items: true } },
+        client: { select: { id: true, name: true, code: true } },
+        vendor: { select: { id: true, name: true, code: true } },
+      },
     });
     expect(rateCardCount).toHaveBeenCalledWith({
       where: { deletedAt: null, status: "ACTIVE" },
@@ -75,7 +79,11 @@ describe("RateCardsService", () => {
       orderBy: { createdAt: "desc" },
       take: 50,
       skip: 0,
-      include: { _count: { select: { items: true } } },
+      include: {
+        _count: { select: { items: true } },
+        client: { select: { id: true, name: true, code: true } },
+        vendor: { select: { id: true, name: true, code: true } },
+      },
     });
   });
 

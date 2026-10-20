@@ -57,7 +57,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Invalidate a session' })
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     await this.authService.logout(req.cookies?.refresh_token);
-    res.clearCookie('refresh_token', { path: '/auth', sameSite: 'strict' });
+    res.clearCookie('refresh_token', { path: '/', sameSite: 'lax' });
     return { success: true, message: 'Logged out successfully.' };
   }
 
@@ -149,8 +149,8 @@ export class AuthController {
     res.cookie('refresh_token', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/auth',
+      sameSite: 'lax',
+      path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
   }

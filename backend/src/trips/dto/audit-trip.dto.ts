@@ -3,15 +3,15 @@ import { IsIn, IsInt, IsObject, IsOptional, IsString, Min, MinLength } from "cla
 
 export class AuditTripDto {
   @Type(() => Number)
-  @IsInt()
-  @Min(0)
+  @IsInt({ message: "Version must be an integer." })
+  @Min(0, { message: "Version must be zero or greater." })
   version!: number;
 
-  @IsIn(["AUDITED", "CORRECTION_REQUESTED"])
+  @IsIn(["AUDITED", "CORRECTION_REQUESTED"], { message: "Outcome must be AUDITED or CORRECTION_REQUESTED." })
   outcome!: "AUDITED" | "CORRECTION_REQUESTED";
 
-  @IsString()
-  @MinLength(3)
+  @IsString({ message: "Notes are required." })
+  @MinLength(3, { message: "Notes must be at least 3 characters." })
   notes!: string;
 
   @IsOptional()

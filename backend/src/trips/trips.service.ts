@@ -58,7 +58,22 @@ export class TripsService {
 
   async list(query: ListTripsQueryDto) {
     const where: Prisma.TripWhereInput = { deletedAt: null };
-    if (query.status) where.status = query.status as any;
+
+    if (query.status === "active") {
+      // Frontend convenience filter: all trips that are still in the operational workflow
+      where.status = {
+        in: [
+          "ASSIGNED",
+          "IN_PROGRESS",
+          "DELIVERY_IN_PROGRESS",
+          "DELIVERED",
+          "AUDIT_PENDING",
+          "CORRECTION_REQUESTED",
+        ],
+      };
+    } else if (query.status) {
+      where.status = query.status as any;
+    }
     if (query.clientId) where.clientId = query.clientId;
     if (query.driverId) where.driverId = query.driverId;
     if (query.vehicleId) where.vehicleId = query.vehicleId;
