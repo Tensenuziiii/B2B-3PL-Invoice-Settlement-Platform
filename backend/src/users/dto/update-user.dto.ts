@@ -6,6 +6,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { Role, UserStatus } from '@prisma/client';
+import { IsStrongPassword } from '../../common/validators/is-strong-password.validator';
 
 export class UpdateUserDto {
   @IsOptional()
@@ -32,7 +33,7 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsString()
-  @MinLength(12)
+  @IsStrongPassword()
   password?: string;
 
   @IsOptional()

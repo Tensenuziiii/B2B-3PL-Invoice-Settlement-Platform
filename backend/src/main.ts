@@ -8,6 +8,7 @@ import { RequestIdInterceptor } from './common/interceptors/request-id.intercept
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.setGlobalPrefix('api/v1');
   app.use(cookieParser());
   app.useGlobalPipes(
     new ValidationPipe({
@@ -31,7 +32,7 @@ async function bootstrap() {
     .addBearerAuth()
     .build();
   const apiDocument = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, apiDocument);
+  SwaggerModule.setup('api/docs', app, apiDocument, { useGlobalPrefix: false });
 
   await app.listen(process.env.PORT ?? 3001);
 }

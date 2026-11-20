@@ -1,69 +1,56 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { jwtVerify } from "jose";
 
-const protectedRoutes = [
-  "/dispatch",
-  "/audit",
-  "/accounts",
-  "/driver",
-  "/client-portal",
-  "/admin",
-];
+const secret = new TextEncoder().encode(process.env.JWT_SECRET ?? "");
 
-const appAliases: Record<string, string> = {
-  "/app": "/dispatch",
-  "/app/dispatch": "/dispatch",
-  "/app/audit": "/audit",
-  "/app/accounts": "/accounts",
-  "/app/billing": "/accounts",
-  "/app/driver": "/driver",
-  "/app/client-portal": "/client-portal",
-  "/app/admin": "/admin",
+const roleMap: Record<string, string[]> = {
+  "/dispatch": ["ADMIN", "DISPATCH_MANAGER"],
+  "/audit": ["ADMIN", "AUDITOR"],
+  "/accounts": ["ADMIN", "ACCOUNTS"],
+  "/driver": ["ADMIN", "DRIVER"],
+  "/client-portal": ["ADMIN", "CLIENT_AP"],
+  "/vendor-portal": ["ADMIN", "VENDOR_3PL"],
+  "/admin": ["ADMIN"],
 };
 
-export function middleware(request: NextRequest) {
-  const token = request.cookies.get("vecto_access_token")?.value;
-  const { pathname } = request.nextUrl;
-  const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/+$/, "") || "/";
-
-  const aliasTarget = appAliases[normalizedPath];
-
-  if (aliasTarget) {
-    if (!token) {
-      return NextResponse.redirect(new URL("/login", request.url));
-    }
-
-    return NextResponse.redirect(new URL(aliasTarget, request.url));
-  }
-
-  if (normalizedPath === "/") {
-    return NextResponse.redirect(new URL("/login", request.url));
-  }
-
-  const isProtected = protectedRoutes.some(
-    (route) => normalizedPath === route || normalizedPath.startsWith(`${route}/`)
+export async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+  const matchedPrefix = Object.keys(roleMap).find(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
+  if (!matchedPrefix) return NextResponse.next();
 
-  if (isProtected && !token) {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("from", pathname);
-    return NextResponse.redirect(loginUrl);
+  const token = req.cookies.get("vecto_access_token")?.value;
+  if (!token) return redirectToLogin(req, pathname);
+
+  try {
+    const { payload } = await jwtVerify(token, secret);
+    const role = payload.role as string;
+    const allowed = roleMap[matchedPrefix];
+    if (!allowed.includes(role)) {
+      return NextResponse.redirect(new URL("/login", req.url));
+    }
+    return NextResponse.next();
+  } catch {
+    return redirectToLogin(req, pathname);
   }
+}
 
-  return NextResponse.next();
+function redirectToLogin(req: NextRequest, from: string) {
+  const url = new URL("/login", req.url);
+  url.searchParams.set("from", from);
+  return NextResponse.redirect(url);
 }
 
 export const config = {
   matcher: [
-    "/",
-    "/login",
     "/dispatch/:path*",
     "/audit/:path*",
     "/accounts/:path*",
     "/driver/:path*",
     "/client-portal/:path*",
+    "/vendor-portal/:path*",
     "/admin/:path*",
-    "/app",
-    "/app/:path*",
   ],
 };

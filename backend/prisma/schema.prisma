@@ -7,407 +7,1185 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ============================================================
+// ENUMS
+// ============================================================
+
 enum Role {
+  ADMIN
+  STAFF
+  VIEWER
   DISPATCH_MANAGER
   DRIVER
   AUDITOR
   ACCOUNTS
   CLIENT_AP
-  ADMIN
+  VENDOR_3PL
 }
 
 enum UserStatus {
   ACTIVE
-  LOCKED
   INACTIVE
+  LOCKED
 }
 
+// Spec §16 & R1 Lifecycle
 enum TripStatus {
-  PLANNED
-  DISPATCHED
+  // R1 Lifecycle
+  PLACED
+  LOADING
+  LOADED
   IN_TRANSIT
-  DELAYED
-  ARRIVED
   UNLOADING
   DELIVERED
-  EOD_PENDING
-  EOD_CLOSED
+  CLOSED
+  CANCELLED
+  VEHICLE_REPLACED
+
+  // P3 / Operational Sub-states
+  ASSIGNED
+  IN_PROGRESS
+  DELIVERY_IN_PROGRESS
   AUDIT_PENDING
-  AUDIT_FLAGGED
-  AUDIT_VERIFIED
-  BILLED
+  CORRECTION_REQUESTED
+  AUDITED
+  READY_FOR_BILLING
 }
 
+enum PodStatus {
+  PENDING_DELIVERY
+  SOFT_COPY_RECEIVED
+  SOFT_COPY_CHECKED
+  ORIGINAL_DISPATCHED
+  ORIGINAL_RECEIVED
+  SUBMITTED_TO_CLIENT
+  ON_HOLD
+  LOST
+  DUPLICATE_REQUESTED
+  ACKNOWLEDGED
+}
+
+enum TripStopStatus {
+  PENDING
+  IN_PROGRESS
+  DELIVERED
+  FAILED
+}
+
+enum PodDocumentType {
+  PHOTO
+  SIGNATURE
+  LR
+  OTHER
+}
+
+// Spec §29 & R1 Approval Lifecycle
 enum InvoiceStatus {
   DRAFT
-  PUBLISHED
-  PENDING_APPROVAL
-  PARTIALLY_DISPUTED
+  SUBMITTED
+  IN_STAGE
+  APPROVED_STAGE
   APPROVED
+  ON_HOLD
+  FULLY_APPROVED
+  PARTIALLY_PAID
   PAID
+  CANCELLED
+  REJECTED
+  CLIENT_REVIEW
+  PAYMENT_QUEUED
+  DISPUTED
   OVERDUE
 }
 
-enum AlertSeverity {
-  INFO
-  MEDIUM
-  HIGH
-  CRITICAL
+// Spec §24
+enum AuditOutcome {
+  AUDITED
+  CORRECTION_REQUESTED
+}
+
+enum CollectionMode {
+  COD
+  CASH
+  UPI
+  CREDIT
+}
+
+enum ExpenseType {
+  FUEL
+  TOLL
+  PARKING
+  DRIVER_ALLOWANCE
+  EMERGENCY_FUEL
+  REPAIR
+  OTHER
 }
 
 enum NotificationType {
   TRIP
-  ALERT
-  INVOICE
-  PAYMENT
   AUDIT
+  INVOICE
+  DISPUTE
+  PAYMENT
+  SETTLEMENT
+  INVITATION
 }
 
-model User {
-  id                 String    @id @default(cuid())
-  email              String    @unique
-  passwordHash       String?
-  name               String
-  initials           String    @default("VL")
-  role               Role
-  status             UserStatus @default(ACTIVE)
-  failedLoginAttempts Int       @default(0)
-  lockedUntil        DateTime?
-  displayId          String
-  hubName            String?
-  clientId           String?
-  client             Client?   @relation(fields: [clientId], references: [id])
-  refreshTokens      RefreshToken[]
-  passwordResetToken PasswordResetToken[]
-  loginAttempts      LoginAttempt[]
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-  deletedAt          DateTime?
+enum RateType {
+  FIXED_TRIP
+  PER_DELIVERY
+  PER_KM
+}
 
+enum CounterpartyType {
+  CLIENT
+  VENDOR
+}
+
+enum DisputeStatus {
+  DISPUTED
+  UNDER_REVIEW
+  RESOLVED
+}
+
+enum DisputeResolution {
+  ACCEPTED
+  REJECTED
+  PARTIAL_ADJUSTMENT
+}
+
+enum SettlementStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  PAID
+}
+
+// ============================================================
+// TENANT ROOT
+// ============================================================
+
+model Organization {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String
+  legalName  String?
+  gstin      String?
+  pan        String?
+  stateCode  String?
+  status     String   @default("ACTIVE")
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(6)
+
+  users             User[]
+  refreshTokens     RefreshToken[]
+  loginAttempts     LoginAttempt[]
+  auditLogs         AuditLog[]
+  invitations       Invitation[]
+  counters          Counter[]
+
+  vehicles          Vehicle[]
+  drivers           Driver[]
+  clients           Client[]
+  vendors           Vendor[]
+  owners            Owner[]
+  customerContacts  CustomerContact[]
+  approvalStageTemplates ApprovalStageTemplate[]
+  customerDocumentRules  CustomerDocumentRule[]
+  routes            Route[]
+  rateCards         RateCard[]
+  rateCardItems     RateCardItem[]
+  trips             Trip[]
+  tripStops         TripStop[]
+  tripStatusEvents  TripStatusEvent[]
+  tripExceptions    TripException[]
+  tripAssignmentHistories TripAssignmentHistory[]
+  pods              Pod[]
+  podCheckItems     PodCheckItem[]
+  podEvents         PodEvent[]
+  podDocuments      PodDocument[]
+  collections       Collection[]
+  tripExpenses      TripExpense[]
+  eodTally          EodTally[]
+  auditReviews      AuditReview[]
+  invoices          Invoice[]
+  invoiceLines      InvoiceLine[]
+  invoiceStages     InvoiceStage[]
+  invoiceFollowUps  InvoiceFollowUp[]
+  payments          Payment[]
+  disputes          Dispute[]
+  messages          Message[]
+  notifications     Notification[]
+  vendorSettlements     VendorSettlement[]
+  vendorSettlementItems VendorSettlementItem[]
+  auditEvents       AuditEvent[]
+
+  @@index([status])
+}
+
+// ============================================================
+// IDENTITY & ACCESS
+// ============================================================
+
+model User {
+  id                  String     @id @default(uuid()) @db.Uuid
+  organizationId      String     @db.Uuid
+  organization        Organization @relation(fields: [organizationId], references: [id])
+  email               String     @unique
+  passwordHash        String?
+  name                String
+  initials            String     @default("VL")
+  role                Role
+  status              UserStatus @default(ACTIVE)
+  failedLoginAttempts Int        @default(0)
+  lockedUntil         DateTime?  @db.Timestamptz(6)
+  displayId           String
+  hubName             String?
+  clientId            String?    @db.Uuid
+  client              Client?    @relation(fields: [clientId], references: [id])
+  createdAt           DateTime   @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime   @updatedAt @db.Timestamptz(6)
+  deletedAt           DateTime?  @db.Timestamptz(6)
+
+  refreshTokens      RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  loginAttempts      LoginAttempt[]
+
+  @@index([organizationId])
   @@index([role, status])
 }
 
 model RefreshToken {
-  id          String    @id @default(cuid())
-  tokenHash   String    @unique
-  userId      String
-  user        User      @relation(fields: [userId], references: [id])
-  expiresAt   DateTime
-  revokedAt   DateTime?
-  familyId    String?
-  createdAt   DateTime  @default(now())
-  replacedBy  String?
-  userAgent   String?
-  ipAddress   String?
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  tokenHash      String    @unique
+  userId         String    @db.Uuid
+  user           User      @relation(fields: [userId], references: [id])
+  expiresAt      DateTime  @db.Timestamptz(6)
+  revokedAt      DateTime? @db.Timestamptz(6)
+  familyId       String?
+  replacedBy     String?
+  userAgent      String?
+  ipAddress      String?
+  createdAt      DateTime  @default(now()) @db.Timestamptz(6)
 
+  @@index([organizationId])
   @@index([userId, revokedAt])
   @@index([familyId, revokedAt])
 }
 
 model PasswordResetToken {
-  id        String    @id @default(cuid())
+  id        String    @id @default(uuid()) @db.Uuid
   tokenHash String    @unique
-  userId    String
+  userId    String    @db.Uuid
   user      User      @relation(fields: [userId], references: [id])
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime  @default(now())
+  expiresAt DateTime  @db.Timestamptz(6)
+  usedAt    DateTime? @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
 }
 
-model Hub {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  region      String?
-  city        String?
-  stateCode   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  deletedAt   DateTime?
-  trips       Trip[]
-}
+model Invitation {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  email          String
+  role           Role
+  tokenHash      String    @unique
+  expiresAt      DateTime  @db.Timestamptz(6)
+  acceptedAt     DateTime? @db.Timestamptz(6)
+  invitedById    String?   @db.Uuid
+  createdAt      DateTime  @default(now()) @db.Timestamptz(6)
 
-model Client {
-  id                String    @id @default(cuid())
-  name              String
-  code              String    @unique
-  gstin             String?
-  stateCode         String?
-  paymentTermsDays  Int       @default(30)
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  deletedAt         DateTime?
-  users             User[]
-  trips             Trip[]
-  invoices          Invoice[]
-}
-
-model Vehicle {
-  id               String    @id @default(cuid())
-  regNo            String    @unique
-  currentOdometer  Int
-  active           Boolean   @default(true)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  deletedAt        DateTime?
-  trips            Trip[]
-}
-
-model Driver {
-  id            String    @id @default(cuid())
-  name          String
-  phone         String
-  userId        String?   @unique
-  dutyStatus    String?   @default("OFFLINE")
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  deletedAt     DateTime?
-  trips         Trip[]
-}
-
-model Shift {
-  id        String    @id @default(cuid())
-  date      DateTime
-  number    Int       @default(1)
-  startAt   DateTime?
-  endAt     DateTime?
-  createdAt DateTime  @default(now())
-  trips     Trip[]
-}
-
-model Trip {
-  id              String    @id @default(cuid())
-  tripCode        String    @unique
-  status          TripStatus @default(PLANNED)
-  version         Int       @default(0)
-  hubId           String?
-  hub             Hub?      @relation(fields: [hubId], references: [id])
-  clientId        String?
-  client          Client?   @relation(fields: [clientId], references: [id])
-  driverId        String?
-  driver          Driver?   @relation(fields: [driverId], references: [id])
-  vehicleId       String?
-  vehicle         Vehicle?  @relation(fields: [vehicleId], references: [id])
-  shiftId         String?
-  shift           Shift?    @relation(fields: [shiftId], references: [id])
-  origin         String?
-  destination     String?
-  eta            DateTime?
-  startOdometer  Int?
-  currentOdometer Int?
-  delayMinutes   Int       @default(0)
-  delayReason    String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  deletedAt       DateTime?
-  tripStops      TripStop[]
-  lorryReceipt   LorryReceipt?
-  pod            Pod?
-  expenses       TripExpense[]
-  advances       DriverAdvance[]
-  eodTally       EodTally?
-  invoiceLine    InvoiceLine?
-
-  @@index([status, hubId])
-}
-
-model TripStop {
-  id          String   @id @default(cuid())
-  tripId      String
-  trip        Trip     @relation(fields: [tripId], references: [id])
-  order       Int
-  name        String?
-  address     String?
-  createdAt   DateTime @default(now())
-
-  @@index([tripId, order])
-}
-
-model LorryReceipt {
-  id            String    @id @default(cuid())
-  tripId        String    @unique
-  trip          Trip      @relation(fields: [tripId], references: [id])
-  lrNo          String    @unique
-  consignor     String?
-  consignee     String?
-  pallets       Int?
-  weightKg      Int?
-  codAmount     Int?
-  goodsDescription String?
-  createdAt     DateTime  @default(now())
-  deletedAt     DateTime?
-}
-
-model Pod {
-  id                  String    @id @default(cuid())
-  tripId              String    @unique
-  trip                Trip      @relation(fields: [tripId], references: [id])
-  photoKey            String?
-  signatureKey        String?
-  signatoryName       String?
-  designation        String?
-  dockGpsLat          Float?
-  dockGpsLng          Float?
-  gpsAccuracyPercent  Int?
-  gateInTimestamp     DateTime?
-  stampVerified      Boolean   @default(false)
-  authHash           String?
-  device             String?
-  createdAt          DateTime  @default(now())
-}
-
-model DriverAdvance {
-  id         String   @id @default(cuid())
-  tripId     String
-  trip       Trip     @relation(fields: [tripId], references: [id])
-  amount     Int
-  createdAt  DateTime @default(now())
-}
-
-model TripExpense {
-  id          String   @id @default(cuid())
-  tripId      String
-  trip        Trip     @relation(fields: [tripId], references: [id])
-  type        String
-  amount      Int
-  receiptRef  String?
-  createdAt   DateTime @default(now())
-}
-
-model EodTally {
-  id                   String   @id @default(cuid())
-  tripId               String   @unique
-  trip                 Trip     @relation(fields: [tripId], references: [id])
-  toll                 Int      @default(0)
-  allowance            Int      @default(0)
-  fuel                 Int      @default(0)
-  advance              Int      @default(0)
-  actualCash           Int      @default(0)
-  netExpected          Int      @default(0)
-  discrepancy          Int      @default(0)
-  createdAt            DateTime @default(now())
-}
-
-model AuditReview {
-  id              String   @id @default(cuid())
-  tripId          String
-  auditorId      String?
-  gateDistance   Boolean  @default(false)
-  gateCash       Boolean  @default(false)
-  gateSignature  Boolean  @default(false)
-  gateStamp      Boolean  @default(false)
-  gateDoc        Boolean  @default(false)
-  decision       String?
-  notes          String?
-  slaDueAt       DateTime?
-  createdAt      DateTime @default(now())
-}
-
-model Invoice {
-  id             String        @id @default(cuid())
-  invoiceNumber   String        @unique
-  status         InvoiceStatus @default(DRAFT)
-  clientId       String?
-  client         Client?       @relation(fields: [clientId], references: [id])
-  issueDate      DateTime      @default(now())
-  dueDate        DateTime?
-  subtotal       Int           @default(0)
-  gst            Int           @default(0)
-  total          Int           @default(0)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  deletedAt      DateTime?
-  lines          InvoiceLine[]
-  payments       Payment[]
-
-  @@index([status, dueDate])
-  @@index([clientId, createdAt])
-}
-
-model InvoiceLine {
-  id             String    @id @default(cuid())
-  invoiceId      String
-  invoice        Invoice   @relation(fields: [invoiceId], references: [id])
-  tripId         String    @unique
-  trip           Trip      @relation(fields: [tripId], references: [id])
-  lineAmount     Int
-  gstAmount      Int
-  totalAmount    Int
-  createdAt      DateTime  @default(now())
-}
-
-model Payment {
-  id          String    @id @default(cuid())
-  invoiceId    String
-  invoice     Invoice   @relation(fields: [invoiceId], references: [id])
-  amount      Int
-  method      String?
-  paidAt      DateTime  @default(now())
-  createdAt   DateTime  @default(now())
-}
-
-model Notification {
-  id          String             @id @default(cuid())
-  userId      String?
-  type        NotificationType?
-  title       String
-  body        String
-  readAt      DateTime?
-  createdAt   DateTime           @default(now())
-}
-
-model SystemAlert {
-  id           String        @id @default(cuid())
-  title        String
-  severity     AlertSeverity @default(MEDIUM)
-  vehicle      String?
-  source       String?
-  dismissedBy  String?
-  dismissedAt  DateTime?
-  createdAt    DateTime      @default(now())
-}
-
-model InvoiceSequence {
-  id          String   @id @default(cuid())
-  financialYear String
-  counter     Int      @default(0)
-  prefix      String   @default("INV")
-}
-
-model AuditLog {
-  id          String    @id @default(cuid())
-  actorId     String?
-  actorRole   String?
-  action      String
-  entity      String
-  entityId    String
-  beforeJson  Json?
-  afterJson   Json?
-  ipAddress   String?
-  userAgent   String?
-  createdAt   DateTime  @default(now())
-}
-
-model IdempotencyKey {
-  id          String    @id @default(cuid())
-  key         String    @unique
-  endpoint    String
-  responseHash String
-  expiresAt   DateTime
-  createdAt   DateTime  @default(now())
+  @@index([organizationId])
+  @@index([email])
 }
 
 model LoginAttempt {
-  id            String   @id @default(cuid())
-  email         String
-  userId        String?
-  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  succeeded     Boolean  @default(false)
-  failureReason String?
-  ipAddress     String?
-  userAgent     String?
-  createdAt     DateTime @default(now())
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String?   @db.Uuid
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  email          String
+  userId         String?   @db.Uuid
+  user           User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  succeeded      Boolean   @default(false)
+  failureReason  String?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime  @default(now()) @db.Timestamptz(6)
 
   @@index([email, createdAt])
   @@index([userId, createdAt])
-  @@index([succeeded, createdAt])
+  @@index([organizationId])
 }
+
+// ============================================================
+// COUNTERS  (org-scoped human-readable IDs, spec §11)
+// ============================================================
+
+model Counter {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  entityType     String   // "TRIP" | "INVOICE" | "DISPUTE" | "SETTLEMENT"
+  period         String   // "202610"
+  lastValue      Int      @default(0)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(6)
+
+  @@unique([organizationId, entityType, period])
+  @@index([organizationId])
+}
+
+// ============================================================
+// MASTER DATA
+// ============================================================
+
+model Client {
+  id               String   @id @default(uuid()) @db.Uuid
+  organizationId   String   @db.Uuid
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  name             String
+  code             String
+  gstin            String?
+  stateCode        String?
+  paymentTermsDays Int      @default(30)
+  creditDays       Int      @default(30)
+  digitalPodEnabled Boolean @default(false)
+  status           String   @default("ACTIVE")
+  createdAt        DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @db.Timestamptz(6)
+  deletedAt        DateTime? @db.Timestamptz(6)
+
+  users            User[]
+  trips            Trip[]
+  invoices         Invoice[]
+  rateCards        RateCard[]
+  contacts         CustomerContact[]
+  approvalTemplates ApprovalStageTemplate[]
+  documentRules    CustomerDocumentRule[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([organizationId, status])
+}
+
+model CustomerContact {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  clientId       String       @db.Uuid
+  client         Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name           String
+  role           String?      // e.g. "ACCOUNTS_PAYABLE", "LOGISTICS_HEAD", "WAREHOUSE_MANAGER"
+  phone          String?
+  email          String?
+  isPrimary      Boolean      @default(false)
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([clientId])
+}
+
+model ApprovalStageTemplate {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  clientId       String       @db.Uuid
+  client         Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  sequence       Int
+  name           String       // e.g. "POD Check", "Plant Clearance", "Finance Authorization"
+  slaHours       Int          @default(48)
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(6)
+
+  @@unique([clientId, sequence])
+  @@index([organizationId])
+  @@index([clientId])
+}
+
+model CustomerDocumentRule {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  clientId       String       @db.Uuid
+  client         Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  documentType   String       // e.g. "ORIGINAL_LR", "WEIGHMENT_SLIP", "INVOICE_COPY", "GATE_PASS"
+  isMandatory    Boolean      @default(true)
+  notes          String?
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(6)
+
+  @@unique([clientId, documentType])
+  @@index([organizationId])
+  @@index([clientId])
+}
+
+model Owner {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  name           String
+  partyType      String       @default("INDIVIDUAL") // "INDIVIDUAL" | "FLEET_OPERATOR" | "TRANSPORTER"
+  pan            String?
+  phone          String?
+  address        String?
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(6)
+  deletedAt      DateTime?    @db.Timestamptz(6)
+
+  trucks         Vehicle[]
+  trips          Trip[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([organizationId, pan])
+}
+
+model Vehicle {
+  id              String    @id @default(uuid()) @db.Uuid
+  organizationId  String    @db.Uuid
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  regNo           String
+  type            String?
+  capacityKg      Int?
+  currentOdometer Int
+  ownerId         String?   @db.Uuid
+  owner           Owner?    @relation(fields: [ownerId], references: [id])
+  insuranceExpiry DateTime? @db.Timestamptz(6)
+  fitnessExpiry   DateTime? @db.Timestamptz(6)
+  pucExpiry       DateTime? @db.Timestamptz(6)
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt       DateTime? @db.Timestamptz(6)
+
+  trips Trip[]
+  assignmentHistoryAsPrev TripAssignmentHistory[] @relation("PrevVehicle")
+  assignmentHistoryAsNew  TripAssignmentHistory[] @relation("NewVehicle")
+
+  @@unique([organizationId, regNo])
+  @@index([organizationId])
+  @@index([organizationId, active])
+}
+
+model Driver {
+  id              String    @id @default(uuid()) @db.Uuid
+  organizationId  String    @db.Uuid
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  name            String
+  phone           String
+  licenseNo       String?
+  licenseExpiry   DateTime? @db.Timestamptz(6)
+  verificationStatus String? @default("VERIFIED")
+  userId          String?   @unique @db.Uuid
+  dutyStatus      String?   @default("OFFLINE")
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt       DateTime? @db.Timestamptz(6)
+
+  trips Trip[]
+  assignmentHistoryAsPrev TripAssignmentHistory[] @relation("PrevDriver")
+  assignmentHistoryAsNew  TripAssignmentHistory[] @relation("NewDriver")
+
+  @@index([organizationId])
+  @@index([organizationId, active])
+  @@index([organizationId, phone])
+}
+
+
+// ============================================================
+// EXECUTION
+// ============================================================
+
+model Trip {
+  id                String     @id @default(uuid()) @db.Uuid
+  organizationId    String     @db.Uuid
+  organization      Organization @relation(fields: [organizationId], references: [id])
+  tripNumber        String
+  lrNumber          String?
+  status            TripStatus @default(ASSIGNED)
+  version           Int        @default(0)
+  clientId          String?    @db.Uuid
+  client            Client?    @relation(fields: [clientId], references: [id])
+  vendorId          String?    @db.Uuid
+  vendor            Vendor?    @relation(fields: [vendorId], references: [id])
+  ownerId           String?    @db.Uuid
+  owner             Owner?     @relation(fields: [ownerId], references: [id])
+  routeId           String?    @db.Uuid
+  route             Route?     @relation(fields: [routeId], references: [id])
+  driverId          String?    @db.Uuid
+  driver            Driver?    @relation(fields: [driverId], references: [id])
+  vehicleId         String?    @db.Uuid
+  vehicle           Vehicle?   @relation(fields: [vehicleId], references: [id])
+  origin            String?
+  destination       String?
+  eta               DateTime?  @db.Timestamptz(6)
+  odometerStart     Int?
+  odometerEnd       Int?
+  delayMinutes      Int        @default(0)
+  delayReason       String?
+  assignedAt        DateTime?  @db.Timestamptz(6)
+  startedAt         DateTime?  @db.Timestamptz(6)
+  deliveredAt       DateTime?  @db.Timestamptz(6)
+  closedAt          DateTime?  @db.Timestamptz(6)
+  auditRequestedAt  DateTime?  @db.Timestamptz(6)
+  auditedAt         DateTime?  @db.Timestamptz(6)
+  readyForBillingAt DateTime?  @db.Timestamptz(6)
+  createdAt         DateTime   @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime   @updatedAt @db.Timestamptz(6)
+  deletedAt         DateTime?  @db.Timestamptz(6)
+
+  tripStops              TripStop[]
+  tripExpenses           TripExpense[]
+  eodTally               EodTally?
+  auditReviews           AuditReview[]
+  invoiceLine            InvoiceLine?
+  vendorSettlementItem   VendorSettlementItem?
+  exceptions             TripException[]
+  statusEvents           TripStatusEvent[]
+  assignmentHistory      TripAssignmentHistory[]
+  pod                    Pod?
+
+  @@unique([organizationId, tripNumber])
+  @@index([organizationId])
+  @@index([status])
+  @@index([organizationId, driverId, status])
+}
+
+model TripStatusEvent {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  tripId         String       @db.Uuid
+  trip           Trip         @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  fromStatus     String
+  toStatus       String
+  actorId        String?      @db.Uuid
+  reason         String?
+  occurredAt     DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([tripId, occurredAt])
+}
+
+model TripException {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  tripId         String       @db.Uuid
+  trip           Trip         @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type           String       // "DELAY" | "BREAKDOWN" | "ACCIDENT" | "ROUTE_DEVIATION" | "ASSIGNMENT_OVERRIDE"
+  reason         String
+  actorId        String?      @db.Uuid
+  occurredAt     DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([tripId])
+}
+
+model TripAssignmentHistory {
+  id                String       @id @default(uuid()) @db.Uuid
+  organizationId    String       @db.Uuid
+  organization      Organization @relation(fields: [organizationId], references: [id])
+  tripId            String       @db.Uuid
+  trip              Trip         @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  previousVehicleId String?      @db.Uuid
+  previousVehicle   Vehicle?     @relation("PrevVehicle", fields: [previousVehicleId], references: [id])
+  newVehicleId      String?      @db.Uuid
+  newVehicle        Vehicle?     @relation("NewVehicle", fields: [newVehicleId], references: [id])
+  previousDriverId  String?      @db.Uuid
+  previousDriver    Driver?      @relation("PrevDriver", fields: [previousDriverId], references: [id])
+  newDriverId       String?      @db.Uuid
+  newDriver         Driver?      @relation("NewDriver", fields: [newDriverId], references: [id])
+  reason            String?
+  reminderPartB     Boolean      @default(false)
+  changedById       String?      @db.Uuid
+  occurredAt        DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([tripId])
+}
+
+model Pod {
+  id                  String       @id @default(uuid()) @db.Uuid
+  organizationId      String       @db.Uuid
+  organization        Organization @relation(fields: [organizationId], references: [id])
+  tripId              String       @unique @db.Uuid
+  trip                Trip         @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  currentStatus       PodStatus    @default(PENDING_DELIVERY)
+  deliveredAt         DateTime?    @db.Timestamptz(6)
+  originalReceivedAt  DateTime?    @db.Timestamptz(6)
+  holdReason          String?
+  holdRemarks         String?
+  courierName         String?
+  courierTrackingNo   String?
+  courierDispatchedAt DateTime?    @db.Timestamptz(6)
+  submittedToClientAt DateTime?    @db.Timestamptz(6)
+  invoiceId           String?      @unique @db.Uuid
+  invoice             Invoice?     @relation("InvoicePod", fields: [invoiceId], references: [id])
+  createdAt           DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime     @updatedAt @db.Timestamptz(6)
+
+  checkItems          PodCheckItem[]
+  events              PodEvent[]
+
+  @@index([organizationId])
+  @@index([currentStatus])
+}
+
+model PodCheckItem {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  podId          String       @db.Uuid
+  pod            Pod          @relation(fields: [podId], references: [id], onDelete: Cascade)
+  itemCode       String       // "STAMP_LEGIBLE" | "SIGNATURE_VALID" | "DATE_RECORDED" | "QTY_MATCH"
+  result         String       // "PASS" | "FAIL" | "WAIVED"
+  notes          String?
+  checkedById    String?      @db.Uuid
+  checkedAt      DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@unique([podId, itemCode])
+  @@index([organizationId])
+  @@index([podId])
+}
+
+model PodEvent {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  podId          String       @db.Uuid
+  pod            Pod          @relation(fields: [podId], references: [id], onDelete: Cascade)
+  fromStatus     String?
+  toStatus       String
+  actorId        String?      @db.Uuid
+  reason         String?
+  remarks        String?
+  occurredAt     DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([podId, occurredAt])
+}
+
+model TripStop {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  tripId         String         @db.Uuid
+  trip           Trip           @relation(fields: [tripId], references: [id])
+  sequence       Int
+  name           String?
+  address        String?
+  expectedQty    Int?
+  deliveredQty   Int?
+  collectionType CollectionMode @default(COD)
+  expectedCollection Int        @default(0)
+  status         TripStopStatus @default(PENDING)
+  qtyMismatchFlag Boolean       @default(false)
+  createdAt      DateTime       @default(now()) @db.Timestamptz(6)
+
+  collection   Collection?
+  podDocuments PodDocument[]
+
+  @@index([organizationId])
+  @@index([tripId, sequence])
+}
+
+model PodDocument {
+  id                String          @id @default(uuid()) @db.Uuid
+  organizationId    String          @db.Uuid
+  organization      Organization    @relation(fields: [organizationId], references: [id])
+  tripStopId        String          @db.Uuid
+  tripStop          TripStop        @relation(fields: [tripStopId], references: [id], onDelete: Cascade)
+  documentType      PodDocumentType
+  s3Key             String
+  contentType       String
+  sizeBytes         Int
+  sha256            String?
+  signatoryName     String?
+  dockGpsLat        Float?
+  dockGpsLng        Float?
+  gateInTimestamp   DateTime?       @db.Timestamptz(6)
+  stampVerified     Boolean         @default(false)
+  authHash          String?
+  uploadedById      String?         @db.Uuid
+  ocrResult         Json?
+  validationResult  Json?
+  createdAt         DateTime        @default(now()) @db.Timestamptz(6)
+
+  disputes          Dispute[]
+
+  @@index([organizationId])
+  @@index([tripStopId])
+  @@index([organizationId, documentType])
+}
+
+
+model TripExpense {
+  id             String      @id @default(uuid()) @db.Uuid
+  organizationId String      @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  tripId         String      @db.Uuid
+  trip           Trip        @relation(fields: [tripId], references: [id])
+  type           ExpenseType
+  amount         Int
+  receiptRef     String?
+  note           String?
+  createdAt      DateTime    @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([tripId])
+}
+
+model EodTally {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  tripId         String   @unique @db.Uuid
+  trip           Trip     @relation(fields: [tripId], references: [id])
+  toll           Int      @default(0)
+  allowance      Int      @default(0)
+  fuel           Int      @default(0)
+  actualCash     Int      @default(0)
+  netExpected    Int      @default(0)
+  discrepancy    Int      @default(0)
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+}
+
+model AuditReview {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  tripId         String       @db.Uuid
+  trip           Trip         @relation(fields: [tripId], references: [id])
+  reviewerId     String?      @db.Uuid
+  outcome        AuditOutcome
+  checklist      Json?
+  notes          String?
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([tripId])
+}
+
+// ============================================================
+// FINANCIALS
+// ============================================================
+
+model Invoice {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  invoiceNumber  String
+  status         InvoiceStatus @default(DRAFT)
+  version        Int           @default(0)
+  clientId       String?       @db.Uuid
+  client         Client?       @relation(fields: [clientId], references: [id])
+  issueDate      DateTime      @default(now()) @db.Timestamptz(6)
+  dueDate        DateTime?     @db.Timestamptz(6)
+  periodStart    DateTime?     @db.Timestamptz(6)
+  periodEnd      DateTime?     @db.Timestamptz(6)
+  subtotal       Int           @default(0)
+  gstRate        Int           @default(18)
+  gstAmount      Int           @default(0)
+  total          Int           @default(0)
+  createdAt      DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime      @updatedAt @db.Timestamptz(6)
+  submittedAt    DateTime?     @db.Timestamptz(6)
+  approvedAt     DateTime?     @db.Timestamptz(6)
+  rejectedAt     DateTime?     @db.Timestamptz(6)
+  cancelledAt    DateTime?     @db.Timestamptz(6)
+  deletedAt      DateTime?     @db.Timestamptz(6)
+
+  lines          InvoiceLine[]
+  payments       Payment[]
+  podId          String?       @unique @db.Uuid
+  pod            Pod?          @relation("InvoicePod")
+  stages         InvoiceStage[]
+  followUps      InvoiceFollowUp[]
+
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId])
+  @@index([status, dueDate])
+  @@index([clientId])
+}
+
+model InvoiceStage {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  invoiceId      String       @db.Uuid
+  invoice        Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  sequence       Int
+  name           String
+  status         String       @default("PENDING") // "PENDING" | "ACTIVE" | "APPROVED" | "ON_HOLD"
+  approvedById   String?      @db.Uuid
+  approvedAt     DateTime?    @db.Timestamptz(6)
+  remarks        String?
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(6)
+
+  @@unique([invoiceId, sequence])
+  @@index([organizationId])
+  @@index([invoiceId])
+}
+
+model InvoiceFollowUp {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  invoiceId      String       @db.Uuid
+  invoice        Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  contactedOn    DateTime     @default(now()) @db.Timestamptz(6)
+  contactPerson  String?
+  outcome        String       // "PROMISE_TO_PAY" | "UNDER_REVIEW" | "CORRECTION_NEEDED" | "CALL_BACK"
+  remarks        String?
+  nextFollowUpOn DateTime?    @db.Timestamptz(6)
+  loggedById     String?      @db.Uuid
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([invoiceId])
+  @@index([nextFollowUpOn])
+}
+
+model InvoiceLine {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  invoiceId      String   @db.Uuid
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id])
+  tripId         String   @unique @db.Uuid
+  trip           Trip     @relation(fields: [tripId], references: [id])
+  lineAmount     Int
+  gstAmount      Int
+  totalAmount    Int
+  snapshot       Json?
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+
+  dispute        Dispute?
+
+  @@index([organizationId])
+  @@index([invoiceId])
+}
+
+model Payment {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  invoiceId      String   @db.Uuid
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id])
+  amount         Int
+  method         String?
+  reference      String?
+  paidAt         DateTime @default(now()) @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([invoiceId])
+}
+
+model VendorSettlement {
+  id                String            @id @default(uuid()) @db.Uuid
+  organizationId    String            @db.Uuid
+  organization      Organization      @relation(fields: [organizationId], references: [id])
+  settlementNumber  String
+  vendorId          String            @db.Uuid
+  vendor            Vendor            @relation(fields: [vendorId], references: [id])
+  status            SettlementStatus  @default(DRAFT)
+  version           Int               @default(0)
+  periodStart       DateTime?         @db.Timestamptz(6)
+  periodEnd         DateTime?         @db.Timestamptz(6)
+  subtotal          Int               @default(0)
+  adjustments       Int               @default(0)
+  total             Int               @default(0)
+  submittedAt       DateTime?         @db.Timestamptz(6)
+  approvedAt        DateTime?         @db.Timestamptz(6)
+  paidAt            DateTime?         @db.Timestamptz(6)
+  notes             String?
+  createdAt         DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime          @updatedAt @db.Timestamptz(6)
+  deletedAt         DateTime?         @db.Timestamptz(6)
+
+  items VendorSettlementItem[]
+
+  @@unique([organizationId, settlementNumber])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, vendorId])
+}
+
+model VendorSettlementItem {
+  id                 String           @id @default(uuid()) @db.Uuid
+  organizationId     String           @db.Uuid
+  organization       Organization     @relation(fields: [organizationId], references: [id])
+  settlementId       String           @db.Uuid
+  settlement         VendorSettlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  tripId             String           @unique @db.Uuid
+  trip               Trip             @relation(fields: [tripId], references: [id])
+  lineAmount         Int
+  snapshot           Json?
+  createdAt          DateTime         @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([settlementId])
+}
+
+model Dispute {
+  id                String             @id @default(uuid()) @db.Uuid
+  organizationId    String             @db.Uuid
+  organization      Organization       @relation(fields: [organizationId], references: [id])
+  disputeNumber     String
+  invoiceLineId     String             @db.Uuid
+  invoiceLine       InvoiceLine        @relation(fields: [invoiceLineId], references: [id])
+  raisedById        String             @db.Uuid
+  reasonCode        String
+  comment           String
+  evidenceDocId     String?            @db.Uuid
+  evidenceDoc       PodDocument?       @relation(fields: [evidenceDocId], references: [id])
+  amountPaise       Int
+  status            DisputeStatus      @default(DISPUTED)
+  resolution        DisputeResolution?
+  resolvedById      String?            @db.Uuid
+  resolvedAt        DateTime?          @db.Timestamptz(6)
+  resolutionNotes   String?
+  version           Int                @default(0)
+  createdAt         DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @db.Timestamptz(6)
+
+  messages          Message[]
+
+  @@unique([organizationId, disputeNumber])
+  @@unique([invoiceLineId])   // one open dispute per line — enforced by unique constraint
+  @@index([organizationId])
+  @@index([organizationId, status])
+}
+
+model Message {
+  id              String       @id @default(uuid()) @db.Uuid
+  organizationId  String       @db.Uuid
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  disputeId       String       @db.Uuid
+  dispute         Dispute      @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  authorId        String       @db.Uuid
+  body            String
+  createdAt       DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([disputeId, createdAt])
+}
+
+// ============================================================
+// NOTIFICATIONS & AUDIT
+// ============================================================
+
+model Notification {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @db.Uuid
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  userId         String?           @db.Uuid
+  type           NotificationType?
+  title          String
+  body           String
+  payload        Json?
+  readAt         DateTime?         @db.Timestamptz(6)
+  createdAt      DateTime          @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([userId, readAt])
+}
+
+model Vendor {
+  id               String    @id @default(uuid()) @db.Uuid
+  organizationId   String    @db.Uuid
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  name             String
+  code             String
+  gstin            String?
+  stateCode        String?
+  payoutTermsDays  Int       @default(15)
+  status           String    @default("ACTIVE")
+  createdAt        DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt        DateTime? @db.Timestamptz(6)
+
+  rateCards RateCard[]
+  trips     Trip[]
+  settlements VendorSettlement[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([organizationId, status])
+}
+
+model Route {
+  id                    String    @id @default(uuid()) @db.Uuid
+  organizationId        String    @db.Uuid
+  organization          Organization @relation(fields: [organizationId], references: [id])
+  name                  String
+  origin                String
+  destination           String
+  expectedKm            Int
+  standardTollEstimate  Int       @default(0)
+  status                String    @default("ACTIVE")
+  createdAt             DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt             DateTime? @db.Timestamptz(6)
+
+  rateCardItems RateCardItem[]
+  trips         Trip[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([organizationId, status])
+}
+
+model RateCard {
+  id                String    @id @default(uuid()) @db.Uuid
+  organizationId    String    @db.Uuid
+  organization      Organization @relation(fields: [organizationId], references: [id])
+  name              String
+  counterpartyType  CounterpartyType
+  clientId          String?   @db.Uuid
+  client            Client?   @relation(fields: [clientId], references: [id])
+  vendorId          String?   @db.Uuid
+  vendor            Vendor?   @relation(fields: [vendorId], references: [id])
+  validFrom         DateTime  @db.Timestamptz(6)
+  validTo           DateTime? @db.Timestamptz(6)
+  status            String    @default("ACTIVE")
+  notes             String?
+  createdAt         DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt         DateTime? @db.Timestamptz(6)
+
+  items RateCardItem[]
+
+  @@index([organizationId])
+  @@index([organizationId, counterpartyType, clientId])
+  @@index([organizationId, counterpartyType, vendorId])
+  @@index([organizationId, status])
+  @@index([organizationId, validFrom, validTo])
+}
+
+model RateCardItem {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  rateCardId     String    @db.Uuid
+  rateCard       RateCard  @relation(fields: [rateCardId], references: [id], onDelete: Cascade)
+  rateType       RateType
+  routeId        String?   @db.Uuid
+  route          Route?    @relation(fields: [routeId], references: [id])
+  tripType       String?
+  serviceType    String?
+  rate           Int       // paise or rupees-per-unit — consistent with spec §30 (INR)
+  notes          String?
+  createdAt      DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([rateCardId])
+  @@index([organizationId, rateType])
+}
+
+model Collection {
+  id                String       @id @default(uuid()) @db.Uuid
+  organizationId    String       @db.Uuid
+  organization      Organization @relation(fields: [organizationId], references: [id])
+  tripStopId        String       @unique @db.Uuid
+  tripStop          TripStop     @relation(fields: [tripStopId], references: [id])
+  actualAmount      Int
+  mode              CollectionMode
+  referenceId       String?
+  collectedAt       DateTime     @default(now()) @db.Timestamptz(6)
+  recordedById      String?      @db.Uuid
+  notes             String?
+  createdAt         DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+}
+
+model AuditLog {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  actorId        String?   @db.Uuid
+  actorRole      String?
+  action         String
+  entity         String
+  entityId       String    @db.Uuid
+  beforeJson     Json?
+  afterJson      Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([entity, entityId])
+  @@index([actorId])
+}
+
+// ============================================================
+// IDEMPOTENCY
+// ============================================================
+
+model IdempotencyKey {
+  id             String   @id @default(uuid()) @db.Uuid
+  key            String   @unique
+  endpoint       String
+  responseHash   String
+  expiresAt      DateTime @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+}
+
+// ============================================================
+// PERMISSIONS
+// ============================================================
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique
+  description String
+  category    String
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  rolePermissions RolePermission[]
+
+  @@index([category])
+}
+
+model RolePermission {
+  role         Role
+  permissionId String   @db.Uuid
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([role, permissionId])
+  @@index([role])
+}
+
+// ============================================================
+// AUDIT EVENT (R1 Append-Only Traceability)
+// ============================================================
+
+model AuditEvent {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  userId         String?      @db.Uuid
+  entityType     String       // "TRIP" | "POD" | "INVOICE" | "CUSTOMER" | "ASSET"
+  entityId       String       @db.Uuid
+  action         String       // "CREATE" | "STATUS_CHANGE" | "EXCEPTION" | "HOLD" | "PAYMENT"
+  oldValue       Json?
+  newValue       Json?
+  occurredAt     DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([entityType, entityId])
+  @@index([userId])
+}
+
+

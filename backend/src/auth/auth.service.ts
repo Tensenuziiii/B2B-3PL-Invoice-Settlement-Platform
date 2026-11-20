@@ -1,12 +1,16 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Role, UserStatus } from '@prisma/client';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaRootService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 
-const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000;
 const LOGIN_FAILURE_LIMIT = 5;
 const LOGIN_LOCK_DURATION_MS = 15 * 60 * 1000;
@@ -17,6 +21,9 @@ type TokenPayload = {
   role: Role;
   displayId: string;
   hubName: string | null;
+  orgId: string;
+  permissions: string[];
+  clientId?: string | null;
 };
 
 export type LoginRequestMetadata = {
@@ -61,18 +68,24 @@ const LOGIN_PRESETS = [
     label: 'Platform Administrator',
     redirectPath: '/admin',
   },
+  {
+    email: 'partner@3pl-vendor.in',
+    role: Role.VENDOR_3PL,
+    label: '3PL Vendor Portal',
+    redirectPath: '/vendor-portal',
+  },
 ] as const;
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly jwtService: JwtService,
-    private readonly prisma: PrismaService,
+    private readonly prisma: PrismaRootService,
   ) {}
 
   async login(dto: LoginDto, metadata: LoginRequestMetadata = {}) {
     const email = dto.email.trim().toLowerCase();
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prisma.user.findFirst({
       where: { email },
     });
 
@@ -134,15 +147,27 @@ export class AuthService {
       });
     }
 
+    const rolePerms = await this.prisma.rolePermission.findMany({
+      where: { role: user.role },
+      select: { permission: { select: { code: true } } },
+    });
+    const permissionCodes = rolePerms.map((rp) => rp.permission.code);
+
     const payload: TokenPayload = {
       sub: user.id,
       email: user.email,
       role: user.role,
       displayId: user.displayId,
       hubName: user.hubName,
+      orgId: user.organizationId,
+      permissions: permissionCodes,
+      clientId: user.clientId ?? null,
     };
+    if (user.clientId === undefined) {
+      delete payload.clientId;
+    }
 
-    const session = await this.createSession(payload, user.id, metadata);
+    const session = await this.createSession(payload, user, metadata);
 
     const resultUser = {
       id: payload.sub,
@@ -217,6 +242,7 @@ export class AuthService {
         data: {
           tokenHash: nextTokenHash,
           userId: storedToken.userId,
+          organizationId: storedToken.user.organizationId,
           familyId,
           expiresAt: new Date(now.getTime() + REFRESH_TOKEN_TTL_MS),
         },
@@ -226,12 +252,21 @@ export class AuthService {
         data: { replacedBy: replacement.id },
       });
 
+      const rolePerms = await this.prisma.rolePermission.findMany({
+        where: { role: storedToken.user.role },
+        select: { permission: { select: { code: true } } },
+      });
+      const permissionCodes = rolePerms.map((rp) => rp.permission.code);
+
       const payload: TokenPayload = {
         sub: storedToken.user.id,
         email: storedToken.user.email,
         role: storedToken.user.role,
         displayId: storedToken.user.displayId,
         hubName: storedToken.user.hubName,
+        orgId: storedToken.user.organizationId,
+        permissions: permissionCodes,
+        clientId: storedToken.user.clientId ?? null,
       };
 
       return {
@@ -257,7 +292,7 @@ export class AuthService {
   }
 
   async requestPasswordReset(email: string) {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prisma.user.findFirst({
       where: { email: email.trim().toLowerCase() },
     });
     const response = {
@@ -344,14 +379,57 @@ export class AuthService {
     return { success: true, message: 'Password reset successfully.' };
   }
 
-  me(user: TokenPayload) {
+  async me(user: TokenPayload) {
+    const dbUser = await this.prisma.user.findFirst({
+      where: { id: user.sub },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        initials: true,
+        role: true,
+        displayId: true,
+        hubName: true,
+        status: true,
+        organizationId: true,
+        clientId: true,
+        createdAt: true,
+        organization: {
+          select: { id: true, name: true, legalName: true, gstin: true, stateCode: true },
+        },
+      },
+    });
+
+    if (!dbUser) {
+      throw new UnauthorizedException('User no longer exists.');
+    }
+
     return {
-      id: user.sub,
-      email: user.email,
-      role: user.role,
-      displayId: user.displayId,
-      hubName: user.hubName,
+      ...dbUser,
+      permissions: user.permissions,
     };
+  }
+
+  async listRoles() {
+    const roles = Object.values(Role);
+    const result = [];
+    for (const role of roles) {
+      const perms = await this.prisma.rolePermission.findMany({
+        where: { role },
+        select: { permission: { select: { code: true, description: true, category: true } } },
+      });
+      result.push({
+        role,
+        permissions: perms.map((p) => p.permission),
+      });
+    }
+    return result;
+  }
+
+  async listPermissions() {
+    return this.prisma.permission.findMany({
+      orderBy: [{ category: 'asc' }, { code: 'asc' }],
+    });
   }
 
   getPresets() {
@@ -363,9 +441,79 @@ export class AuthService {
     }));
   }
 
+  async inviteUser(input: {
+    email: string;
+    role: Role;
+    invitedById: string;
+    organizationId: string;
+  }) {
+    const email = input.email.trim().toLowerCase();
+    const token = randomBytes(32).toString('base64url');
+    const tokenHash = this.hashToken(token);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    await this.prisma.invitation.create({
+      data: {
+        organizationId: input.organizationId,
+        email,
+        role: input.role,
+        tokenHash,
+        expiresAt,
+        invitedById: input.invitedById,
+      },
+    });
+
+    // Email sending is out of scope for this step — log the token in dev only
+    if (process.env.NODE_ENV === 'development') {
+      return { success: true, token }; // returned so admin can share the invite link
+    }
+    return { success: true };
+  }
+
+  async acceptInvite(input: { token: string; password: string }) {
+    const tokenHash = this.hashToken(input.token);
+    const invitation = await this.prisma.invitation.findFirst({
+      where: { tokenHash, acceptedAt: null, expiresAt: { gt: new Date() } },
+    });
+
+    if (!invitation) {
+      throw new UnauthorizedException('Invalid or expired invitation.');
+    }
+
+    const passwordHash = await argon2.hash(input.password);
+
+    await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.user.findFirst({
+        where: { email: invitation.email },
+      });
+      if (existing) {
+        throw new ConflictException('User with this email already exists.');
+      }
+
+      await tx.user.create({
+        data: {
+          organizationId: invitation.organizationId,
+          email: invitation.email,
+          name: invitation.email.split('@')[0],
+          initials: invitation.email.slice(0, 2).toUpperCase(),
+          passwordHash,
+          role: invitation.role,
+          displayId: `USR-${Date.now()}`,
+        },
+      });
+
+      await tx.invitation.update({
+        where: { id: invitation.id },
+        data: { acceptedAt: new Date() },
+      });
+    });
+
+    return { success: true };
+  }
+
   private async createSession(
     payload: TokenPayload,
-    userId: string,
+    user: { id: string; organizationId: string },
     metadata: LoginRequestMetadata,
   ) {
     const refreshToken = randomBytes(48).toString('base64url');
@@ -373,7 +521,8 @@ export class AuthService {
       await transaction.refreshToken.create({
         data: {
           tokenHash: this.hashToken(refreshToken),
-          userId,
+          userId: user.id,
+          organizationId: user.organizationId,
           familyId: randomUUID(),
           expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
         },
@@ -381,7 +530,8 @@ export class AuthService {
       await transaction.loginAttempt.create({
         data: {
           email: payload.email,
-          userId,
+          userId: user.id,
+          organizationId: user.organizationId,
           succeeded: true,
           ipAddress: metadata.ipAddress,
           userAgent: metadata.userAgent?.slice(0, 512),

@@ -10,6 +10,11 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        platinum: "#EFEFEF",
+        royal: "#3454D1",
+        turquoise: "#34D1BF",
+        void: "#070707",
+        magenta: "#D1345B",
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",

@@ -1,0 +1,48 @@
+export const SCOPED_MODELS = new Set<string>([
+  "User",
+  "RefreshToken",
+  "LoginAttempt",
+  "Invitation",
+  "Counter",
+  "AuditLog",
+  "Notification",
+  "Client",
+  "Vehicle",
+  "Driver",
+  "Vendor",
+  "Route",
+  "RateCard",
+  "RateCardItem",
+  "Trip",
+  "TripStop",
+  "TripStatusEvent",
+  "TripException",
+  "TripAssignmentHistory",
+  "Pod",
+  "PodCheckItem",
+  "PodEvent",
+  "PodDocument",
+  "TripExpense",
+  "EodTally",
+  "AuditReview",
+  "Invoice",
+  "InvoiceLine",
+  "InvoiceStage",
+  "InvoiceFollowUp",
+  "Payment",
+  "Dispute",
+  "Message",
+  "VendorSettlement",
+  "VendorSettlementItem",
+  "Owner",
+  "CustomerContact",
+  "ApprovalStageTemplate",
+  "CustomerDocumentRule",
+  "AuditEvent",
+]);
+
+// NOT scoped (intentional):
+//   - Organization       — it IS the tenant root
+//   - IdempotencyKey     — cross-tenant operational cache
+//   - PasswordResetToken — auth-only, has no organizationId field
+//   - AuditLog           — has organizationId, but writes go through PrismaRootService to allow system-level audits if needed

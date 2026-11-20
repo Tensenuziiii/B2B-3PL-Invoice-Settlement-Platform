@@ -2,10 +2,10 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Truck,
   MapPin,
-  Navigation,
   Phone,
   Camera,
   CheckCircle2,
@@ -13,21 +13,16 @@ import {
   Package,
   Layers,
   FileText,
-  IndianRupee,
   QrCode,
   Banknote,
   LogOut,
   ChevronRight,
   RotateCcw,
-  Sparkles,
-  ArrowLeft,
-  ShieldCheck,
-  Compass,
   AlertCircle,
   ExternalLink,
 } from "lucide-react";
 
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -37,11 +32,20 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 
+import { apiClient, ApiError } from "@/lib/api/client";
+import type { Trip } from "@/lib/api/types";
+import { getDisplayName, formatRupees, formatDate, logoutUser } from "@/lib/api/utils";
+
 export default function DriverMobileWebApp() {
+  const router = useRouter();
+  // Trip State
+  const [trip, setTrip] = useState<Trip | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   // Driver Shift & Status State
   const [onShift, setOnShift] = useState(true);
   const [tripStage, setTripStage] = useState<"driving" | "arrived" | "completed">("driving");
@@ -49,16 +53,70 @@ export default function DriverMobileWebApp() {
   // POD & Collection Modal State
   const [isPodModalOpen, setIsPodModalOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<"CASH" | "UPI">("CASH");
-  const [cashCollectedAmount, setCashCollectedAmount] = useState("24500");
-  const [receiverName, setReceiverName] = useState("K. Ramesh (Warehouse In-Charge)");
+  const [cashCollectedAmount, setCashCollectedAmount] = useState("");
+  const [referenceId, setReferenceId] = useState("");
+  const [receiverName, setReceiverName] = useState("");
   const [hasCapturedPhoto, setHasCapturedPhoto] = useState(false);
+  const [s3Key, setS3Key] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
+
   const [isSigned, setIsSigned] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
   const [deliverySuccessMessage, setDeliverySuccessMessage] = useState(false);
 
-  // Signature Canvas Ref & Simple Touch/Mouse Drawing
+  // File input ref for camera capture
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Signature Canvas Ref & Touch/Mouse Drawing
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+
+  const getExpectedCollection = (t: Trip | null): number => {
+    if (!t) return 0;
+    if (t.tripStops && t.tripStops.length > 0) {
+      return t.tripStops.reduce((sum, s) => sum + (s.expectedCollection ?? 0), 0);
+    }
+    return Number((t as any).expectedCollection) || 0;
+  };
+
+  const fetchCurrentTrip = async () => {
+    try {
+      const res = await apiClient.get<{ data: Trip | null }>("/trips/current");
+      setTrip(res.data);
+      const exp = getExpectedCollection(res.data);
+      if (exp > 0) {
+        setCashCollectedAmount(String(exp));
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to load current trip");
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiClient.get<{ data: Trip | null }>("/trips/current");
+        if (!cancelled) {
+          setTrip(res.data);
+          const exp = getExpectedCollection(res.data);
+          if (exp > 0) {
+            setCashCollectedAmount(String(exp));
+          }
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof ApiError ? err.message : "Failed to load current trip");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Setup canvas
   useEffect(() => {
@@ -73,7 +131,9 @@ export default function DriverMobileWebApp() {
     }
   }, [isPodModalOpen]);
 
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+  const startDrawing = (
+    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
+  ) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -90,7 +150,9 @@ export default function DriverMobileWebApp() {
     ctx.moveTo(clientX - rect.left, clientY - rect.top);
   };
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+  const draw = (
+    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
+  ) => {
     if (!isDrawing) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -118,24 +180,187 @@ export default function DriverMobileWebApp() {
     setIsSigned(false);
   };
 
-  const handleSimulateCapturePhoto = () => {
-    setHasCapturedPhoto(true);
+  const getSignatureBlob = (): Promise<Blob | null> => {
+    return new Promise((resolve) => {
+      if (!canvasRef.current || !isSigned) {
+        resolve(null);
+        return;
+      }
+      canvasRef.current.toBlob((blob) => {
+        resolve(blob);
+      }, "image/png");
+    });
   };
 
-  const handleConfirmDelivery = (e: React.FormEvent) => {
+  const tripStops = Array.isArray(trip?.tripStops)
+    ? (trip.tripStops as Array<Record<string, unknown>>)
+    : [];
+  const currentStop =
+    tripStops.find((s) => s.status !== "COMPLETED") || tripStops[0] || null;
+  const currentTripStopId = currentStop
+    ? String(currentStop.id || "stop-1")
+    : String((trip as any)?.currentStopId || (trip as any)?.stopId || "stop-1");
+
+  const upcomingStops = tripStops.filter((s) => s !== currentStop && s.status !== "COMPLETED");
+
+  const [transitioningStatus, setTransitioningStatus] = useState(false);
+
+  const advanceTripStatus = async (toStatus: string) => {
+    if (!trip) return;
+    setTransitioningStatus(true);
+    try {
+      await apiClient.post(`/trips/${trip.id}/status-transitions`, {
+        toStatus,
+      });
+      await fetchCurrentTrip();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to update trip status");
+    } finally {
+      setTransitioningStatus(false);
+    }
+  };
+
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSelectedFile(file);
+    setPhotoUploading(true);
+    setPhotoUploadError(null);
+    try {
+      const presign = await apiClient.post<{ url: string; s3Key: string }>(
+        "/pods/presign-upload",
+        {
+          tripStopId: currentTripStopId,
+          documentType: "PHOTO",
+          contentType: file.type || "image/jpeg",
+          sizeBytes: file.size,
+        }
+      );
+      await fetch(presign.url, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": file.type || "image/jpeg" },
+      });
+      setS3Key(presign.s3Key);
+      setHasCapturedPhoto(true);
+    } catch (err) {
+      setPhotoUploadError(
+        err instanceof ApiError ? err.message : "Failed to upload POD photo"
+      );
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
+
+  const handleRetakePhoto = () => {
+    setHasCapturedPhoto(false);
+    setS3Key(null);
+    setSelectedFile(null);
+    setPhotoUploadError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handleConfirmDelivery = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hasCapturedPhoto) {
-      alert("Please capture or upload the physical Lorry Receipt (LR) photo first.");
+    if (!trip) return;
+    if (!hasCapturedPhoto || !s3Key || !selectedFile) {
+      setModalError("Please capture or upload the physical Lorry Receipt (LR) photo first.");
       return;
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
+    setModalError(null);
+
+    try {
+      const tripId = String(trip.id);
+      const tripStopId = currentTripStopId;
+
+      // 1. Sign-on-glass upload if signature exists
+      let signatureS3Key: string | null = null;
+      if (isSigned && canvasRef.current) {
+        const sigBlob = await getSignatureBlob();
+        if (sigBlob) {
+          const sigPresign = await apiClient.post<{ url: string; s3Key: string }>(
+            "/pods/presign-upload",
+            {
+              tripStopId,
+              documentType: "SIGNATURE",
+              contentType: "image/png",
+              sizeBytes: sigBlob.size,
+            }
+          );
+          await fetch(sigPresign.url, {
+            method: "PUT",
+            body: sigBlob,
+            headers: { "Content-Type": "image/png" },
+          });
+          signatureS3Key = sigPresign.s3Key;
+          await apiClient.post("/pods", {
+            tripStopId,
+            documentType: "SIGNATURE",
+            s3Key: signatureS3Key,
+            contentType: "image/png",
+            sizeBytes: sigBlob.size,
+            signatoryName: receiverName.trim() || null,
+          });
+        }
+      }
+
+      // 2. Collection entry (inside POD modal)
+      if (cashCollectedAmount) {
+        await apiClient.post(`/trips/${tripId}/collections`, {
+          tripStopId,
+          actualAmount: Number(cashCollectedAmount),
+          mode: paymentMethod,
+          referenceId: referenceId.trim() || null,
+        });
+      }
+
+      // 3. Confirm POD photo
+      await apiClient.post("/pods", {
+        tripStopId,
+        documentType: "PHOTO",
+        s3Key,
+        contentType: selectedFile.type || "image/jpeg",
+        sizeBytes: selectedFile.size,
+        signatoryName: receiverName.trim() || null,
+      });
+
+      // 4. Complete trip stop
+      await apiClient.post(`/trips/${tripId}/stops/${tripStopId}/complete`);
+
+      // 5. If this was the last remaining stop, transition trip status to DELIVERED
+      if (upcomingStops.length === 0) {
+        try {
+          await apiClient.post(`/trips/${tripId}/status-transitions`, {
+            toStatus: "DELIVERED",
+          });
+        } catch {
+          // Non-blocking if trip is already DELIVERED
+        }
+      }
+
+      // 6. Refetch current trip
+      await fetchCurrentTrip();
+
+      // Close modal and show success
       setIsPodModalOpen(false);
       setTripStage("completed");
       setDeliverySuccessMessage(true);
-    }, 700);
+      handleRetakePhoto();
+      clearSignature();
+      setReferenceId("");
+    } catch (err) {
+      setModalError(
+        err instanceof ApiError
+          ? err.message
+          : "Failed to submit POD and complete delivery"
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -158,6 +383,13 @@ export default function DriverMobileWebApp() {
             >
               Dispatch UI <ExternalLink className="h-3 w-3" />
             </Link>
+            <button
+              type="button"
+              onClick={() => logoutUser(router)}
+              className="text-red-400 hover:text-red-300 font-sans text-xs underline font-medium flex items-center gap-0.5 cursor-pointer"
+            >
+              Log Out
+            </button>
           </div>
         </div>
 
@@ -167,30 +399,40 @@ export default function DriverMobileWebApp() {
             <div>
               <div className="flex items-center space-x-2">
                 <h1 className="text-lg font-black tracking-tight text-white uppercase">
-                  Rajesh Kumar
+                  {getDisplayName(trip?.driver, "Driver On Duty")}
                 </h1>
-                <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold px-1.5 py-0.5 rounded">
-                  ACTIVE
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
+                    onShift
+                      ? "bg-turquoise/25 text-turquoise border border-turquoise/40"
+                      : "bg-slate-700 text-slate-400 border border-slate-600"
+                  }`}
+                >
+                  {onShift ? "ACTIVE" : "OFF DUTY"}
                 </span>
               </div>
               <div className="flex items-center space-x-2 mt-1">
-                <span className="bg-slate-800 text-amber-400 font-mono text-sm font-bold px-2 py-0.5 rounded border border-slate-700">
-                  MH 12 RN 4920
+                <span className="bg-slate-800 text-turquoise font-mono text-sm font-bold px-2 py-0.5 rounded border border-slate-700">
+                  {getDisplayName(trip?.vehicle, "No Vehicle Assigned")}
                 </span>
-                <span className="text-xs text-slate-300 font-mono">16T Eicher Pro</span>
+                {Boolean(trip?.tripNumber) && (
+                  <span className="text-xs text-slate-300 font-mono">
+                    {String(trip?.tripNumber)}
+                  </span>
+                )}
               </div>
             </div>
 
             {/* Shift Toggle Button */}
             <button
               onClick={() => setOnShift(!onShift)}
-              className={`px-3 py-2 rounded-lg font-bold text-xs flex items-center space-x-1.5 transition-all shadow-sm ${
+              className={`px-4 py-2 rounded-lg font-bold text-xs flex items-center space-x-1.5 transition-all shadow-sm ${
                 onShift
-                  ? "bg-red-600 hover:bg-red-700 text-white border border-red-500"
-                  : "bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500"
+                  ? "bg-magenta hover:bg-magenta/90 text-white border border-magenta"
+                  : "bg-turquoise hover:bg-turquoise/90 text-void border border-turquoise font-extrabold"
               }`}
             >
-              <LogOut className="h-3.5 w-3.5" />
+              <LogOut className="h-4 w-4" />
               <span>{onShift ? "End Shift" : "Start Shift"}</span>
             </button>
           </div>
@@ -198,9 +440,16 @@ export default function DriverMobileWebApp() {
           {/* Quick Hub Notice */}
           <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between text-xs text-slate-300">
             <span className="flex items-center gap-1">
-              <MapPin className="h-3.5 w-3.5 text-blue-400" /> Bhiwandi Hub #4
+              <MapPin className="h-3.5 w-3.5 text-blue-400" />{" "}
+              {trip?.origin ? String(trip.origin) : "Base Hub"}
             </span>
-            <span className="font-mono text-slate-400">Route: BHI-SAN-01</span>
+            <span className="font-mono text-slate-400">
+              {trip?.destination
+                ? `Dest: ${String(trip.destination)}`
+                : trip?.status
+                ? `Status: ${String(trip.status)}`
+                : "No active route"}
+            </span>
           </div>
         </header>
 
@@ -213,7 +462,7 @@ export default function DriverMobileWebApp() {
               <div>
                 <p>Shift has been ended.</p>
                 <p className="text-xs font-normal text-amber-800 mt-0.5">
-                  Vehicle telematics are paused. Tap Start Shift above to resume delivery GPS.
+                  Vehicle telematics are paused. Tap Start Shift above to resume duty.
                 </p>
               </div>
             </div>
@@ -226,7 +475,7 @@ export default function DriverMobileWebApp() {
               <div>
                 <h4 className="font-bold text-sm">POD & Cash Settled!</h4>
                 <p className="text-xs text-emerald-800 mt-0.5">
-                  LR signed & ₹24,500 recorded. Next destination unlocked below.
+                  Delivery confirmed & POD recorded. Next destination unlocked below.
                 </p>
                 <button
                   onClick={() => {
@@ -241,206 +490,222 @@ export default function DriverMobileWebApp() {
             </div>
           )}
 
-          {/* 2. ACTIVE TRIP VIEW (MAIN SCREEN) */}
-          <Card className="border-2 border-slate-900 rounded-xl overflow-hidden shadow-lg bg-white">
-            <CardHeader className="bg-slate-900 text-white p-3.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Badge className="bg-blue-600 hover:bg-blue-600 text-white font-mono text-[11px] px-2 py-0.5 rounded uppercase font-bold tracking-wider">
-                    CURRENT STOP #1
-                  </Badge>
-                  <span className="text-xs text-slate-300 font-mono">INV-9921</span>
-                </div>
-                <Badge
-                  variant="outline"
-                  className="border-emerald-400 text-emerald-300 bg-emerald-950/40 text-[10px] font-bold"
-                >
-                  HIGH PRIORITY
-                </Badge>
-              </div>
-            </CardHeader>
+          {/* Error State Banner */}
+          {error && (
+            <div className="p-3.5 bg-red-50 border-2 border-red-300 rounded-lg text-red-900 text-xs font-semibold flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
 
-            <CardContent className="p-4 space-y-4">
-              {/* Destination & Client Header */}
-              <div>
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h2 className="text-xl font-black text-slate-900 leading-snug">
-                      Metro Cash & Carry
-                    </h2>
-                    <p className="text-sm font-bold text-blue-700">
-                      Whitefield Regional Distribution Center
-                    </p>
-                  </div>
-                  <a
-                    href="tel:+919876543210"
-                    className="h-10 w-10 rounded-full bg-slate-100 border border-slate-300 flex items-center justify-center text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"
-                    title="Call Receiver"
-                  >
-                    <Phone className="h-5 w-5 text-slate-800" />
-                  </a>
-                </div>
-
-                <p className="text-xs font-medium text-slate-600 mt-1 flex items-center gap-1">
-                  <MapPin className="h-3.5 w-3.5 text-slate-500 flex-shrink-0" />
-                  Plot 14-A, EPIP Zone, Hoodi, Whitefield, Bengaluru - 560066
-                </p>
-              </div>
-
-              {/* Cargo Details Box */}
-              <div className="grid grid-cols-3 gap-2 p-3 bg-slate-100 border border-slate-300 rounded-lg text-center">
-                <div className="border-r border-slate-300 pr-1">
-                  <span className="text-[11px] font-bold text-slate-600 block uppercase">
-                    Cargo
-                  </span>
-                  <span className="text-sm font-black text-slate-900 flex items-center justify-center gap-1">
-                    <Layers className="h-3.5 w-3.5 text-slate-700" /> 12 Pallets
-                  </span>
-                </div>
-                <div className="border-r border-slate-300 px-1">
-                  <span className="text-[11px] font-bold text-slate-600 block uppercase">
-                    Weight
-                  </span>
-                  <span className="text-sm font-black text-slate-900">3.8 Tonnes</span>
-                </div>
-                <div className="pl-1">
-                  <span className="text-[11px] font-bold text-slate-600 block uppercase">
-                    COD to Collect
-                  </span>
-                  <span className="text-sm font-black text-emerald-700">₹24,500</span>
-                </div>
-              </div>
-
-              {/* Mock Map / Routing Area (High Contrast, Outdoor Friendly) */}
-              <div className="relative rounded-lg overflow-hidden border-2 border-slate-800 bg-slate-900 text-white p-3.5">
-                {/* Simulated GPS Routing HUD */}
-                <div className="flex items-center justify-between mb-2">
+          {/* Loading State */}
+          {loading ? (
+            <Card className="border-2 border-slate-300 rounded-xl overflow-hidden shadow-sm bg-white p-8 flex flex-col items-center justify-center text-center">
+              <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+              <p className="mt-3 text-sm font-bold text-slate-700">Loading current trip...</p>
+            </Card>
+          ) : !trip ? (
+            /* Empty State */
+            <Card className="border-2 border-slate-300 rounded-xl overflow-hidden shadow-sm bg-white p-8 flex flex-col items-center justify-center text-center">
+              <Package className="h-10 w-10 text-slate-400 mb-2" />
+              <p className="text-sm font-bold text-slate-800">
+                No active trip assigned. Check back later.
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                When dispatch assigns a trip to your vehicle, it will appear here.
+              </p>
+            </Card>
+          ) : (
+            /* 2. ACTIVE TRIP VIEW (MAIN SCREEN) */
+            <Card className="border-2 border-slate-900 rounded-xl overflow-hidden shadow-lg bg-white">
+              <CardHeader className="bg-slate-900 text-white p-3.5">
+                <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
-                    <div className="h-7 w-7 rounded-full bg-blue-600 flex items-center justify-center text-white">
-                      <Navigation className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold text-white block">
-                        NH-48 Corridor via Outer Ring Rd
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-mono">
-                        Speed: 48 km/h • GPS Lock Strong
-                      </span>
-                    </div>
+                    <Badge className="bg-blue-600 hover:bg-blue-600 text-white font-mono text-[11px] px-2 py-0.5 rounded uppercase font-bold tracking-wider">
+                      CURRENT STOP
+                    </Badge>
+                    <span className="text-xs text-slate-300 font-mono">
+                      {trip.tripNumber ? String(trip.tripNumber) : String(trip.id)}
+                    </span>
                   </div>
-                  <Badge className="bg-slate-800 border border-slate-700 text-amber-400 font-mono text-xs">
-                    45 km away
+                  <Badge
+                    variant="outline"
+                    className="border-emerald-400 text-emerald-300 bg-emerald-950/40 text-[10px] font-bold uppercase"
+                  >
+                    {String(trip.status || "ACTIVE")}
                   </Badge>
                 </div>
+              </CardHeader>
 
-                {/* Simulated Map Visual Box */}
-                <div className="h-28 w-full bg-slate-950 rounded border border-slate-800 relative flex flex-col items-center justify-center text-slate-500 overflow-hidden">
-                  {/* Grid Lines for GPS Look */}
-                  <div className="absolute inset-0 opacity-15 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:16px_16px]" />
-
-                  {/* Route Line Simulation */}
-                  <div className="absolute left-6 right-6 top-1/2 -translate-y-1/2 flex items-center justify-between z-10 px-4">
-                    <div className="flex flex-col items-center">
-                      <div className="h-4 w-4 rounded-full bg-blue-500 ring-4 ring-blue-500/30 flex items-center justify-center text-white text-[9px] font-bold">
-                        A
-                      </div>
-                      <span className="text-[9px] text-slate-400 mt-1 font-mono">Hub</span>
+              <CardContent className="p-4 space-y-4">
+                {/* Destination & Client Header */}
+                <div>
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h2 className="text-xl font-black text-slate-900 leading-snug">
+                        {getDisplayName(trip.client, "Client Delivery")}
+                      </h2>
+                      <p className="text-sm font-bold text-blue-700">
+                        {String(trip.destination || "Destination Facility")}
+                      </p>
                     </div>
+                    <a
+                      href="tel:+918000000000"
+                      className="h-10 w-10 rounded-full bg-slate-100 border border-slate-300 flex items-center justify-center text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"
+                      title="Call Receiver"
+                    >
+                      <Phone className="h-5 w-5 text-slate-800" />
+                    </a>
+                  </div>
 
-                    <div className="flex-1 mx-3 border-t-2 border-dashed border-blue-400 relative">
-                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-900 px-1 text-[10px] font-mono text-amber-300">
-                        ETA 52 mins
-                      </div>
-                    </div>
+                  <p className="text-xs font-medium text-slate-600 mt-1 flex items-center gap-1">
+                    <MapPin className="h-3.5 w-3.5 text-slate-500 flex-shrink-0" />
+                    {String(trip.destination || "Address specified in consignment manifest")}
+                  </p>
+                </div>
 
-                    <div className="flex flex-col items-center">
-                      <div className="h-4 w-4 rounded-full bg-red-500 ring-4 ring-red-500/30 flex items-center justify-center text-white text-[9px] font-bold">
-                        B
-                      </div>
-                      <span className="text-[9px] text-slate-400 mt-1 font-mono">Metro CC</span>
-                    </div>
+                {/* Cargo Details Box */}
+                <div className="grid grid-cols-3 gap-2 p-3 bg-slate-100 border border-slate-300 rounded-lg text-center">
+                  <div className="border-r border-slate-300 pr-1">
+                    <span className="text-[11px] font-bold text-slate-600 block uppercase">
+                      Origin
+                    </span>
+                    <span className="text-xs font-black text-slate-900 flex items-center justify-center gap-1 truncate">
+                      <Layers className="h-3.5 w-3.5 text-slate-700 flex-shrink-0" />{" "}
+                      {String(trip.origin || "Hub")}
+                    </span>
+                  </div>
+                  <div className="border-r border-slate-300 px-1">
+                    <span className="text-[11px] font-bold text-slate-600 block uppercase">
+                      ETA
+                    </span>
+                    <span className="text-sm font-black text-slate-900">
+                      {String(trip.eta || "On Route")}
+                    </span>
+                  </div>
+                  <div className="pl-1">
+                    <span className="text-[11px] font-bold text-slate-600 block uppercase">
+                      COD to Collect
+                    </span>
+                    <span className="text-sm font-black text-emerald-700">
+                      {formatRupees(getExpectedCollection(trip))}
+                    </span>
                   </div>
                 </div>
 
-                {/* Next Turn Instruction */}
-                <div className="mt-2.5 flex items-center justify-between text-xs font-mono pt-2 border-t border-slate-800">
-                  <span className="text-slate-300 flex items-center gap-1.5">
-                    <Compass className="h-3.5 w-3.5 text-blue-400" /> Next: In 800m, take exit for Hoodi Jn
-                  </span>
-                </div>
-              </div>
+                {/* ACTION TRIGGER BUTTON: Canonical R1 One-Tap Lifecycle Actions */}
+                <div className="pt-2 space-y-2">
+                  {trip.status === "PLACED" && (
+                    <Button
+                      type="button"
+                      disabled={transitioningStatus}
+                      onClick={() => advanceTripStatus("LOADING")}
+                      className="w-full py-6 h-auto text-xl font-black uppercase tracking-wide bg-amber-600 hover:bg-amber-700 text-white rounded-xl shadow-lg border-2 border-amber-600 active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+                    >
+                      <Package className="h-6 w-6" />
+                      {transitioningStatus ? "Updating..." : "Start Loading"}
+                    </Button>
+                  )}
 
-              {/* ACTION TRIGGER BUTTON: High-Contrast Massive Touch Target */}
-              <div className="pt-1">
-                {tripStage === "driving" ? (
-                  <Button
-                    type="button"
-                    onClick={() => setTripStage("arrived")}
-                    className="w-full py-7 text-lg font-black uppercase tracking-wide bg-blue-700 hover:bg-blue-800 text-white rounded-xl shadow-lg border-2 border-blue-900 active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
-                  >
-                    <MapPin className="h-6 w-6 animate-bounce" />
-                    Reached Destination
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    onClick={() => setIsPodModalOpen(true)}
-                    className="w-full py-7 text-lg font-black uppercase tracking-wide bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-lg border-2 border-emerald-800 active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
-                  >
-                    <CheckCircle2 className="h-6 w-6" />
-                    Complete Delivery & POD
-                  </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+                  {trip.status === "LOADING" && (
+                    <Button
+                      type="button"
+                      disabled={transitioningStatus}
+                      onClick={() => advanceTripStatus("LOADED")}
+                      className="w-full py-6 h-auto text-xl font-black uppercase tracking-wide bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg border-2 border-indigo-600 active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+                    >
+                      <CheckCircle2 className="h-6 w-6" />
+                      {transitioningStatus ? "Updating..." : "Mark Loaded"}
+                    </Button>
+                  )}
+
+                  {trip.status === "LOADED" && (
+                    <Button
+                      type="button"
+                      disabled={transitioningStatus}
+                      onClick={() => advanceTripStatus("IN_TRANSIT")}
+                      className="w-full py-6 h-auto text-xl font-black uppercase tracking-wide bg-royal hover:bg-royal/90 text-white rounded-xl shadow-lg border-2 border-royal active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+                    >
+                      <Truck className="h-6 w-6" />
+                      {transitioningStatus ? "Updating..." : "Depart & Start Transit"}
+                    </Button>
+                  )}
+
+                  {trip.status === "IN_TRANSIT" && (
+                    <Button
+                      type="button"
+                      disabled={transitioningStatus}
+                      onClick={() => advanceTripStatus("UNLOADING")}
+                      className="w-full py-6 h-auto text-xl font-black uppercase tracking-wide bg-royal hover:bg-royal/90 text-white rounded-xl shadow-lg border-2 border-royal active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+                    >
+                      <MapPin className="h-6 w-6 animate-bounce" />
+                      {transitioningStatus ? "Updating..." : "Reached Stop / Unloading"}
+                    </Button>
+                  )}
+
+                  {(trip.status === "UNLOADING" ||
+                    trip.status === "IN_PROGRESS" ||
+                    trip.status === "DELIVERY_IN_PROGRESS" ||
+                    !["PLACED", "LOADING", "LOADED", "IN_TRANSIT", "DELIVERED", "CLOSED"].includes(String(trip.status))) && (
+                    <Button
+                      type="button"
+                      onClick={() => setIsPodModalOpen(true)}
+                      className="w-full py-6 h-auto text-xl font-black uppercase tracking-wide bg-turquoise hover:bg-turquoise/90 text-void rounded-xl shadow-lg border-2 border-turquoise active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+                    >
+                      <CheckCircle2 className="h-6 w-6 text-void" />
+                      Complete Delivery & POD
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* 3. UP NEXT QUEUE (Upcoming Deliveries) */}
           <section className="space-y-2.5 pt-2">
             <div className="flex items-center justify-between px-1">
               <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                <Clock className="h-3.5 w-3.5 text-slate-500" /> Up Next In Route (2 Stops)
+                <Clock className="h-3.5 w-3.5 text-slate-500" /> Up Next In Route{" "}
+                {upcomingStops.length > 0 ? `(${upcomingStops.length} Stops)` : ""}
               </h3>
-              <span className="text-[11px] font-mono text-slate-600 font-bold">Total: 178 km</span>
             </div>
 
-            {/* Upcoming Delivery Card 1 */}
-            <div className="p-3.5 bg-white border-2 border-slate-300 rounded-lg shadow-xs flex items-center justify-between">
-              <div className="space-y-1">
-                <div className="flex items-center space-x-2">
-                  <Badge variant="outline" className="bg-slate-100 text-slate-800 font-mono text-[10px] font-bold">
-                    STOP #2
-                  </Badge>
-                  <span className="text-xs font-bold text-slate-900">Reliance Retail Central DC</span>
+            {upcomingStops.length > 0 ? (
+              upcomingStops.map((stop, index) => (
+                <div
+                  key={String(stop.id || index)}
+                  className="p-3.5 bg-white border-2 border-slate-300 rounded-lg shadow-xs flex items-center justify-between"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center space-x-2">
+                      <Badge
+                        variant="outline"
+                        className="bg-slate-100 text-slate-800 font-mono text-[10px] font-bold"
+                      >
+                        STOP #{stop.sequence ? String(stop.sequence) : index + 2}
+                      </Badge>
+                      <span className="text-xs font-bold text-slate-900">
+                        {getDisplayName(stop.client, (typeof stop.locationName === "string" && stop.locationName) || "Next Delivery Point")}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600">
+                      {String(stop.destination || stop.address || "")}
+                      {stop.pallets ? ` • ${String(stop.pallets)} Pallets` : ""}
+                    </p>
+                    <div className="text-[11px] text-slate-600 font-mono">
+                      {stop.expectedCollection
+                        ? `COD Expected: ${formatRupees(Number(stop.expectedCollection))}`
+                        : "Pre-paid (No COD)"}
+                    </div>
+                  </div>
+                  <ChevronRight className="h-5 w-5 text-slate-400 flex-shrink-0" />
                 </div>
-                <p className="text-xs text-slate-600">
-                  Hebbal Industrial Estate, Bengaluru • <span className="font-semibold text-slate-800">8 Pallets</span>
-                </p>
-                <div className="text-[11px] text-slate-600 font-mono">
-                  COD Expected: ₹18,200 • 68 km away
-                </div>
+              ))
+            ) : (
+              <div className="p-3.5 bg-white border-2 border-slate-200 rounded-lg text-center text-xs text-slate-500 font-medium">
+                No additional upcoming stops in route.
               </div>
-              <ChevronRight className="h-5 w-5 text-slate-400 flex-shrink-0" />
-            </div>
-
-            {/* Upcoming Delivery Card 2 */}
-            <div className="p-3.5 bg-white border-2 border-slate-300 rounded-lg shadow-xs flex items-center justify-between opacity-85">
-              <div className="space-y-1">
-                <div className="flex items-center space-x-2">
-                  <Badge variant="outline" className="bg-slate-100 text-slate-800 font-mono text-[10px] font-bold">
-                    STOP #3
-                  </Badge>
-                  <span className="text-xs font-bold text-slate-900">Flipkart Wholesale Hub</span>
-                </div>
-                <p className="text-xs text-slate-600">
-                  Nelamangala Logistics Corridor • <span className="font-semibold text-slate-800">15 Pallets</span>
-                </p>
-                <div className="text-[11px] text-slate-600 font-mono">
-                  Pre-paid (No COD) • 110 km away
-                </div>
-              </div>
-              <ChevronRight className="h-5 w-5 text-slate-400 flex-shrink-0" />
-            </div>
+            )}
           </section>
         </main>
 
@@ -451,15 +716,18 @@ export default function DriverMobileWebApp() {
             <span className="text-[10px] font-bold mt-0.5">Active Trip</span>
           </button>
           <button
-            onClick={() => setIsPodModalOpen(true)}
+            onClick={() => {
+              if (trip) setIsPodModalOpen(true);
+            }}
             className="flex flex-col items-center text-slate-400 hover:text-white"
           >
             <Camera className="h-5 w-5" />
             <span className="text-[10px] font-bold mt-0.5">POD Camera</span>
           </button>
           <button
-            onClick={() => alert("Emergency Fuel / Toll Float: ₹12,000 active")}
-            className="flex flex-col items-center text-slate-400 hover:text-white"
+            disabled
+            onClick={() => {}}
+            className="flex flex-col items-center text-slate-500 opacity-50 cursor-not-allowed"
           >
             <Banknote className="h-5 w-5" />
             <span className="text-[10px] font-bold mt-0.5">Expense Float</span>
@@ -486,7 +754,9 @@ export default function DriverMobileWebApp() {
                     Proof of Delivery (POD)
                   </DialogTitle>
                   <DialogDescription className="text-xs text-slate-300 mt-0.5">
-                    Stop #1: Metro Cash & Carry (INV-9921)
+                    {trip
+                      ? `${getDisplayName(trip.client, "Client")} (${String(trip.tripNumber || trip.id)})`
+                      : "Delivery Settlement"}
                   </DialogDescription>
                 </div>
                 <Badge className="bg-blue-600 text-white font-mono text-xs">
@@ -497,7 +767,12 @@ export default function DriverMobileWebApp() {
 
             {/* Scrollable Form Body */}
             <form onSubmit={handleConfirmDelivery} className="flex-1 overflow-y-auto p-4 space-y-5">
-              
+              {modalError && (
+                <div className="p-3 bg-red-50 border border-red-300 rounded-lg text-red-800 text-xs font-medium">
+                  {modalError}
+                </div>
+              )}
+
               {/* UI ELEMENT 1: Upload Lorry Receipt (POD) Camera Dropzone */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
@@ -511,10 +786,27 @@ export default function DriverMobileWebApp() {
                   )}
                 </div>
 
-                {!hasCapturedPhoto ? (
+                {/* Hidden File Input */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={handlePhotoSelect}
+                />
+
+                {photoUploading ? (
+                  <div className="w-full border-2 border-blue-400 bg-blue-50/50 rounded-xl p-6 flex flex-col items-center justify-center space-y-2">
+                    <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+                    <span className="text-xs font-bold text-blue-900">
+                      Uploading POD photo to secure storage...
+                    </span>
+                  </div>
+                ) : !hasCapturedPhoto ? (
                   <button
                     type="button"
-                    onClick={handleSimulateCapturePhoto}
+                    onClick={() => fileInputRef.current?.click()}
                     className="w-full border-3 border-dashed border-slate-400 hover:border-blue-600 bg-slate-50 hover:bg-blue-50/50 rounded-xl p-5 flex flex-col items-center justify-center space-y-2 transition-all active:scale-[0.99]"
                   >
                     <div className="h-14 w-14 rounded-full bg-blue-700 text-white flex items-center justify-center shadow-md">
@@ -534,22 +826,26 @@ export default function DriverMobileWebApp() {
                         <FileText className="h-6 w-6" />
                       </div>
                       <div>
-                        <span className="text-xs font-black text-slate-900 block">
-                          LR_MH12_INV9921_POD.jpg
+                        <span className="text-xs font-black text-slate-900 block truncate max-w-[180px]">
+                          {selectedFile?.name || "LR_POD_document.jpg"}
                         </span>
                         <span className="text-[11px] text-slate-500 font-mono">
-                          Captured at 14:28 IST • Geo-tagged
+                          Uploaded to secure storage
                         </span>
                       </div>
                     </div>
                     <button
                       type="button"
-                      onClick={() => setHasCapturedPhoto(false)}
+                      onClick={handleRetakePhoto}
                       className="text-xs font-bold text-red-600 hover:text-red-700 flex items-center gap-1 p-1"
                     >
                       <RotateCcw className="h-3.5 w-3.5" /> Retake
                     </button>
                   </div>
+                )}
+
+                {photoUploadError && (
+                  <p className="text-xs text-red-600 font-semibold">{photoUploadError}</p>
                 )}
               </div>
 
@@ -647,17 +943,39 @@ export default function DriverMobileWebApp() {
                         Scan Static Truck UPI
                       </span>
                       <span className="text-[11px] text-slate-600 font-mono">
-                        vecto.mh12@icici • Instant Verify
+                        Instant settlement verification
                       </span>
                     </div>
                   </div>
                 )}
 
+                {/* Reference ID (Optional UTR or Receipt ID) */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                    <span>
+                      {paymentMethod === "UPI"
+                        ? "UPI UTR / Reference ID"
+                        : "Receipt / Reference (Optional)"}
+                    </span>
+                    <span className="text-[10px] text-slate-400">Optional</span>
+                  </div>
+                  <Input
+                    type="text"
+                    value={referenceId}
+                    onChange={(e) => setReferenceId(e.target.value)}
+                    placeholder={paymentMethod === "UPI" ? "e.g. 320194829102" : "e.g. REC-8821"}
+                    className="h-10 text-xs font-semibold text-slate-900 bg-slate-50 border-2 border-slate-300 focus-visible:border-slate-900"
+                  />
+                </div>
+
                 {/* Exact Amount Collected Number Input */}
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-xs font-bold text-slate-700">
                     <span>Exact Cash / Remittance Amount</span>
-                    <span className="text-slate-500 font-mono">Expected: ₹24,500</span>
+                    <span className="text-slate-500 font-mono">
+                      Expected:{" "}
+                      {formatRupees(getExpectedCollection(trip))}
+                    </span>
                   </div>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-700">
@@ -675,17 +993,17 @@ export default function DriverMobileWebApp() {
                 </div>
               </div>
 
-              {/* UI ELEMENT 4: Massive Green "Confirm Delivery & Submit" Button */}
+              {/* UI ELEMENT 4: Massive Turquoise "Confirm Delivery & Submit" Button */}
               <div className="pt-2">
                 <Button
                   type="submit"
-                  disabled={isSubmitting}
-                  className="w-full py-7 text-lg font-black uppercase tracking-wide bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xl border-2 border-emerald-800 active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+                  disabled={isSubmitting || photoUploading || !hasCapturedPhoto}
+                  className="w-full py-6 h-auto text-xl font-black uppercase tracking-wide bg-turquoise hover:bg-turquoise/90 text-void rounded-xl shadow-xl border-2 border-turquoise active:scale-[0.98] transition-transform flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  <CheckCircle2 className="h-6 w-6" />
+                  <CheckCircle2 className="h-6 w-6 text-void" />
                   {isSubmitting ? "Submitting Settlement..." : "Confirm Delivery & Submit"}
                 </Button>
-                <p className="text-[11px] text-center text-slate-600 font-medium mt-2">
+                <p className="text-xs text-center text-slate-600 font-medium mt-2">
                   Data will be instantly synced to Dispatch Desk & Accounts Audit.
                 </p>
               </div>

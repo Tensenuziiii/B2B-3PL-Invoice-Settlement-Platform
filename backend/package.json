@@ -11,6 +11,7 @@
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
+    "start:local": "node start-with-db.js",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "db:generate": "prisma generate",
@@ -22,9 +23,12 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
+    "export:openapi": "ts-node src/openapi-export.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1148.0",
+    "@aws-sdk/s3-request-presigner": "^3.1148.0",
     "@nestjs/common": "^11.2.7",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.2.7",
@@ -37,6 +41,7 @@
     "class-validator": "^0.14.4",
     "cookie-parser": "^1.4.7",
     "dotenv": "^18.0.5",
+    "embedded-postgres": "^18.4.0-beta.17",
     "joi": "^17.13.8",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"

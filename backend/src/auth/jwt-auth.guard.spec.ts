@@ -1,7 +1,7 @@
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaRootService } from '../prisma/prisma.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 describe('JwtAuthGuard', () => {
@@ -21,7 +21,7 @@ describe('JwtAuthGuard', () => {
     request.user = undefined;
     guard = new JwtAuthGuard(
       { verify } as unknown as JwtService,
-      { user: { findFirst } } as unknown as PrismaService,
+      { user: { findFirst } } as unknown as PrismaRootService,
     );
   });
 
