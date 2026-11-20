@@ -11,6 +11,7 @@
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
+    "start:local": "node start-with-db.js",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "db:generate": "prisma generate",
@@ -40,6 +41,7 @@
     "class-validator": "^0.14.4",
     "cookie-parser": "^1.4.7",
     "dotenv": "^18.0.5",
+    "embedded-postgres": "^18.4.0-beta.17",
     "joi": "^17.13.8",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"

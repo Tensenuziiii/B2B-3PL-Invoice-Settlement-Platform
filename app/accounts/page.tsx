@@ -31,6 +31,13 @@ import {
   Layers,
   Sparkles,
   LogOut,
+  History,
+  PhoneCall,
+  ShieldCheck,
+  Check,
+  AlertTriangle,
+  Eye,
+  ChevronRight,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -67,9 +74,10 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 import { apiClient, ApiError } from "@/lib/api/client";
-import type { Trip, Invoice, Paginated } from "@/lib/api/types";
+import type { Trip, Invoice, Paginated, Pod, InvoiceStage, InvoiceFollowUp } from "@/lib/api/types";
 import { getDisplayName, formatRupees, formatNumber, formatDate, paiseToRupees, logoutUser } from "@/lib/api/utils";
 
 // Types
@@ -115,6 +123,41 @@ export default function LogisticsAccountsBilling() {
 
   // Modal State for Invoice Generation Preview
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+
+  // Invoice Review, Multi-Stage Approval & CRM State (R1-TASK-6.1 & R1-TASK-6.2)
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [isInvoiceDetailOpen, setIsInvoiceDetailOpen] = useState(false);
+  const [invoiceStages, setInvoiceStages] = useState<InvoiceStage[]>([]);
+  const [invoiceFollowUps, setInvoiceFollowUps] = useState<InvoiceFollowUp[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [stageActionLoading, setStageActionLoading] = useState(false);
+
+  // Stage approval comment state
+  const [stageComments, setStageComments] = useState("");
+  // Stage hold modal state
+  const [holdingStageId, setHoldingStageId] = useState<string | null>(null);
+  const [stageHoldReason, setStageHoldReason] = useState("DISPUTED_LINE");
+  const [stageHoldRemarks, setStageHoldRemarks] = useState("");
+  // Stage release hold state
+  const [releasingStageId, setReleasingStageId] = useState<string | null>(null);
+  const [stageReleaseRemarks, setStageReleaseRemarks] = useState("");
+
+  // CRM Follow-Up form state
+  const [crmContactedPerson, setCrmContactedPerson] = useState("");
+  const [crmContactEmail, setCrmContactEmail] = useState("");
+  const [crmContactPhone, setCrmContactPhone] = useState("");
+  const [crmChannel, setCrmChannel] = useState("PHONE");
+  const [crmOutcome, setCrmOutcome] = useState("PROMISE_TO_PAY");
+  const [crmNotes, setCrmNotes] = useState("");
+  const [crmNextDate, setCrmNextDate] = useState("");
+  const [crmLoading, setCrmLoading] = useState(false);
+
+  // Record Payment form state
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("NEFT");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [paymentDate, setPaymentDate] = useState("");
+  const [paymentLoading, setPaymentLoading] = useState(false);
 
   // On mount, fetch both lists in parallel
   useEffect(() => {
@@ -323,6 +366,188 @@ export default function LogisticsAccountsBilling() {
       setError(err instanceof ApiError ? err.message : "Failed to generate invoice");
     } finally {
       setGenerating(false);
+    }
+  };
+
+  // R1 Handlers for POD Invoicing, Stage Approvals & CRM
+  const handleGenerateFromPod = async (tripId: string) => {
+    setGenerating(true);
+    setError(null);
+    try {
+      const pod = await apiClient.get<Pod>(`/pods/by-trip/${tripId}`);
+      if (!pod || !pod.id) {
+        setError("No POD found for this trip. Trip must reach DELIVERED status first.");
+        return;
+      }
+      if (pod.currentStatus === "ON_HOLD") {
+        setError(`Cannot generate invoice: POD is ON_HOLD (${pod.holdReason}). Release hold in Audit Desk first.`);
+        return;
+      }
+      const invoice = await apiClient.post<Invoice>("/invoices/generate-from-pod", {
+        podId: pod.id,
+      });
+      setNotice({
+        type: "success",
+        message: `Invoice ${invoice.invoiceNumber} successfully generated from POD! Customer approval stages snapshotted.`,
+      });
+      setSelectedTripIds([]);
+      // Refetch
+      const [tripsRes, invoicesRes] = await Promise.all([
+        apiClient.get<Paginated<Trip>>("/trips?status=READY_FOR_BILLING"),
+        apiClient.get<Paginated<Invoice>>("/invoices"),
+      ]);
+      setUnbilledTrips(tripsRes.data);
+      setInvoices(invoicesRes.data);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to generate invoice from POD");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleOpenInvoiceDetail = async (invoice: Invoice) => {
+    setSelectedInvoice(invoice);
+    setIsInvoiceDetailOpen(true);
+    setDetailLoading(true);
+    try {
+      const [stages, followUps] = await Promise.all([
+        apiClient.get<InvoiceStage[]>(`/invoices/${invoice.id}/stages`),
+        apiClient.get<InvoiceFollowUp[]>(`/invoices/${invoice.id}/follow-ups`),
+      ]);
+      setInvoiceStages(stages);
+      setInvoiceFollowUps(followUps);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to load invoice stages/follow-ups");
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const handleApproveStage = async (stageId: string) => {
+    if (!selectedInvoice) return;
+    setStageActionLoading(true);
+    try {
+      const updatedInvoice = await apiClient.post<Invoice>(
+        `/invoices/${selectedInvoice.id}/stages/${stageId}/approve`,
+        { comments: stageComments.trim() || undefined }
+      );
+      setSelectedInvoice(updatedInvoice);
+      setStageComments("");
+      const stages = await apiClient.get<InvoiceStage[]>(`/invoices/${selectedInvoice.id}/stages`);
+      setInvoiceStages(stages);
+      const invRes = await apiClient.get<Paginated<Invoice>>("/invoices");
+      setInvoices(invRes.data);
+      setNotice({
+        type: "success",
+        message: `Stage approved! Invoice status: ${updatedInvoice.status}`,
+      });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to approve stage");
+    } finally {
+      setStageActionLoading(false);
+    }
+  };
+
+  const handleHoldStage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedInvoice || !holdingStageId) return;
+    setStageActionLoading(true);
+    try {
+      const updatedInvoice = await apiClient.post<Invoice>(
+        `/invoices/${selectedInvoice.id}/stages/${holdingStageId}/hold`,
+        { holdReason: stageHoldReason, holdRemarks: stageHoldRemarks.trim() }
+      );
+      setSelectedInvoice(updatedInvoice);
+      setHoldingStageId(null);
+      setStageHoldRemarks("");
+      const stages = await apiClient.get<InvoiceStage[]>(`/invoices/${selectedInvoice.id}/stages`);
+      setInvoiceStages(stages);
+      const invRes = await apiClient.get<Paginated<Invoice>>("/invoices");
+      setInvoices(invRes.data);
+      setNotice({ type: "success", message: `Invoice stage placed on hold (${stageHoldReason}).` });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to place stage on hold");
+    } finally {
+      setStageActionLoading(false);
+    }
+  };
+
+  const handleReleaseStageHold = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedInvoice || !releasingStageId) return;
+    setStageActionLoading(true);
+    try {
+      const updatedInvoice = await apiClient.post<Invoice>(
+        `/invoices/${selectedInvoice.id}/stages/${releasingStageId}/release-hold`,
+        { releaseRemarks: stageReleaseRemarks.trim() || "Hold released by accounts" }
+      );
+      setSelectedInvoice(updatedInvoice);
+      setReleasingStageId(null);
+      setStageReleaseRemarks("");
+      const stages = await apiClient.get<InvoiceStage[]>(`/invoices/${selectedInvoice.id}/stages`);
+      setInvoiceStages(stages);
+      const invRes = await apiClient.get<Paginated<Invoice>>("/invoices");
+      setInvoices(invRes.data);
+      setNotice({ type: "success", message: "Invoice stage hold released." });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to release stage hold");
+    } finally {
+      setStageActionLoading(false);
+    }
+  };
+
+  const handleCreateFollowUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedInvoice) return;
+    setCrmLoading(true);
+    try {
+      const newFollowUp = await apiClient.post<InvoiceFollowUp>(
+        `/invoices/${selectedInvoice.id}/follow-ups`,
+        {
+          contactedPerson: crmContactedPerson.trim() || undefined,
+          contactEmail: crmContactEmail.trim() || undefined,
+          contactPhone: crmContactPhone.trim() || undefined,
+          channel: crmChannel,
+          outcome: crmOutcome || undefined,
+          notes: crmNotes.trim() || undefined,
+          nextFollowUpDate: crmNextDate || undefined,
+        }
+      );
+      setInvoiceFollowUps((prev) => [newFollowUp, ...prev]);
+      setCrmNotes("");
+      setNotice({ type: "success", message: "CRM follow-up touchpoint recorded!" });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to record follow-up");
+    } finally {
+      setCrmLoading(false);
+    }
+  };
+
+  const handleRecordPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedInvoice) return;
+    const amt = Number(paymentAmount);
+    if (isNaN(amt) || amt <= 0) return;
+    setPaymentLoading(true);
+    try {
+      await apiClient.post("/payments", {
+        invoiceId: selectedInvoice.id,
+        amount: amt,
+        paymentMethod,
+        referenceNumber: paymentReference.trim() || undefined,
+        paymentDate: paymentDate || undefined,
+      });
+      setPaymentAmount("");
+      setPaymentReference("");
+      const invRes = await apiClient.get<Paginated<Invoice>>("/invoices");
+      setInvoices(invRes.data);
+      const updated = invRes.data.find((i) => i.id === selectedInvoice.id);
+      if (updated) setSelectedInvoice(updated);
+      setNotice({ type: "success", message: `Payment of ${formatRupees(amt)} recorded successfully!` });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to record payment");
+    } finally {
+      setPaymentLoading(false);
     }
   };
 
@@ -996,12 +1221,15 @@ export default function LogisticsAccountsBilling() {
                           <TableHead className="text-xs font-semibold text-slate-600 py-2.5 text-right w-[140px]">
                             Total Billable
                           </TableHead>
+                          <TableHead className="text-xs font-semibold text-slate-600 py-2.5 text-right w-[110px]">
+                            Actions
+                          </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {loading ? (
                           <TableRow>
-                            <TableCell colSpan={7} className="py-12 text-center text-xs text-slate-500">
+                            <TableCell colSpan={8} className="py-12 text-center text-xs text-slate-500">
                               <div className="flex flex-col items-center justify-center space-y-2">
                                 <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
                                 <span>Loading unbilled trips...</span>
@@ -1010,7 +1238,7 @@ export default function LogisticsAccountsBilling() {
                           </TableRow>
                         ) : filteredUnbilledTrips.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={7} className="py-12 text-center text-xs text-slate-500">
+                            <TableCell colSpan={8} className="py-12 text-center text-xs text-slate-500">
                               No unbilled trips ready for billing.
                             </TableCell>
                           </TableRow>
@@ -1086,6 +1314,20 @@ export default function LogisticsAccountsBilling() {
                                 {/* Total Billable */}
                                 <TableCell className="py-2.5 text-right font-mono font-bold text-slate-900">
                                   {formatRupees(netAmount)}
+                                </TableCell>
+
+                                {/* R1: Generate from POD Button */}
+                                <TableCell className="py-2.5 text-right">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={generating}
+                                    onClick={() => handleGenerateFromPod(tripId)}
+                                    className="h-6 text-[10px] px-2 font-bold text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+                                  >
+                                    Bill from POD
+                                  </Button>
                                 </TableCell>
                               </TableRow>
                             );
@@ -1224,13 +1466,13 @@ export default function LogisticsAccountsBilling() {
                                 </TableCell>
                                 <TableCell className="py-2.5 text-right">
                                   <Button
+                                    type="button"
                                     variant="outline"
                                     size="sm"
-                                    disabled
-                                    title="PDF generation coming soon"
-                                    className="h-6 text-[10px] px-2 border-slate-200 opacity-60 cursor-not-allowed"
+                                    onClick={() => handleOpenInvoiceDetail(inv)}
+                                    className="h-6 text-[10px] px-2 border-slate-300 font-semibold text-royal hover:bg-royal/10"
                                   >
-                                    PDF
+                                    Review & Stages
                                   </Button>
                                 </TableCell>
                               </TableRow>
@@ -1290,6 +1532,18 @@ export default function LogisticsAccountsBilling() {
                     <FileText className="h-3.5 w-3.5" />
                     Draft Preview
                   </Button>
+                  {selectedTripIds.length === 1 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={generating}
+                      onClick={() => handleGenerateFromPod(selectedTripIds[0])}
+                      className="h-8 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 shadow-md flex items-center gap-1.5"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      {generating ? "Generating..." : "Generate from POD"}
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     size="sm"
@@ -1507,6 +1761,441 @@ export default function LogisticsAccountsBilling() {
               {generating ? "Generating..." : "Publish & Send to Client"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* INVOICE REVIEW, MULTI-STAGE APPROVAL & CRM MODAL */}
+      <Dialog open={isInvoiceDetailOpen} onOpenChange={setIsInvoiceDetailOpen}>
+        <DialogContent className="max-w-4xl p-0 overflow-hidden border-slate-200 shadow-2xl max-h-[92vh] flex flex-col">
+          <DialogHeader className="p-4 px-6 border-b border-slate-200 bg-slate-50/90 flex-shrink-0 flex flex-row items-center justify-between space-y-0">
+            <div>
+              <DialogTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Receipt className="h-4 w-4 text-royal" />
+                Invoice {selectedInvoice?.invoiceNumber ?? selectedInvoice?.id}
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-500 mt-0.5">
+                Multi-stage customer approval, CRM touchpoints, and payment settlement ledger.
+              </DialogDescription>
+            </div>
+            <Badge
+              variant="outline"
+              className={`font-mono text-xs font-bold uppercase ${
+                selectedInvoice?.status === "PAID"
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                  : selectedInvoice?.status === "FULLY_APPROVED"
+                  ? "bg-teal-50 text-teal-700 border-teal-300"
+                  : selectedInvoice?.status === "IN_STAGE"
+                  ? "bg-blue-50 text-blue-700 border-blue-300"
+                  : selectedInvoice?.status === "OVERDUE"
+                  ? "bg-red-50 text-red-700 border-red-300"
+                  : "bg-amber-50 text-amber-700 border-amber-300"
+              }`}
+            >
+              {selectedInvoice?.status ?? "DRAFT"}
+            </Badge>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto p-6 space-y-6 text-xs text-slate-800 bg-white">
+            {/* 1. Header Overview Cards */}
+            <div className="grid grid-cols-4 gap-3 p-3.5 rounded-lg border border-slate-200 bg-slate-50/60 text-xs">
+              <div>
+                <span className="text-[10px] text-slate-500 block uppercase font-bold">Client Account</span>
+                <span className="font-bold text-slate-900 mt-0.5 block truncate">
+                  {getDisplayName(selectedInvoice?.client, (selectedInvoice as any)?.clientName ?? "—")}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-500 block uppercase font-bold">Due Date</span>
+                <span className="font-mono text-slate-800 mt-0.5 block">
+                  {selectedInvoice?.dueDate ? String(selectedInvoice.dueDate) : "—"}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-500 block uppercase font-bold">Subtotal (Net)</span>
+                <span className="font-mono font-bold text-slate-900 mt-0.5 block">
+                  {formatRupees(Number(selectedInvoice?.subtotal ?? (Number(selectedInvoice?.total ?? 0) - Number(selectedInvoice?.gstAmount ?? 0))))}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-500 block uppercase font-bold">Grand Total (incl. GST)</span>
+                <span className="font-mono font-bold text-emerald-700 text-sm mt-0.5 block">
+                  {formatRupees(Number(selectedInvoice?.total ?? 0))}
+                </span>
+              </div>
+            </div>
+
+            {/* 2. Multi-Stage Approval Pipeline */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+                  <ShieldCheck className="h-4 w-4 text-royal" /> Sequential Approval Stages (R1 Pipeline)
+                </span>
+                <span className="text-[11px] font-mono text-slate-500">
+                  {invoiceStages.filter((s) => s.status === "APPROVED").length} of {invoiceStages.length} Approved
+                </span>
+              </div>
+
+              {detailLoading ? (
+                <div className="p-6 text-center text-slate-400">Loading approval pipeline...</div>
+              ) : invoiceStages.length === 0 ? (
+                <div className="p-4 rounded-lg border border-slate-200 bg-slate-50 text-slate-500 text-center">
+                  No approval stage templates were configured for this customer.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {invoiceStages.map((st) => (
+                    <div
+                      key={st.id}
+                      className={`p-3 rounded-lg border text-xs transition-all ${
+                        st.status === "APPROVED"
+                          ? "bg-emerald-50/40 border-emerald-300"
+                          : st.status === "ON_HOLD"
+                          ? "bg-red-50/50 border-red-300"
+                          : "bg-white border-slate-200 shadow-xs"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="grid h-6 w-6 place-items-center rounded-full bg-slate-100 font-mono text-[11px] font-bold text-slate-700">
+                            {st.stageOrder}
+                          </span>
+                          <span className="font-bold text-slate-900">{st.stageName}</span>
+                          <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                            Role: {st.approverRole}
+                          </span>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={`text-[9px] font-bold px-1.5 py-0 uppercase ${
+                            st.status === "APPROVED"
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                              : st.status === "ON_HOLD"
+                              ? "bg-red-50 text-red-700 border-red-300"
+                              : "bg-amber-50 text-amber-700 border-amber-300"
+                          }`}
+                        >
+                          {st.status}
+                        </Badge>
+                      </div>
+
+                      {st.comments && (
+                        <div className="mt-1.5 text-[11px] text-slate-600 italic">
+                          Comments: &ldquo;{st.comments}&rdquo;
+                        </div>
+                      )}
+                      {st.approvedAt && (
+                        <div className="mt-1 text-[10px] text-slate-500 font-mono">
+                          Approved On: {formatDate(st.approvedAt as any)}
+                        </div>
+                      )}
+
+                      {/* Actions for Pending or On Hold stages */}
+                      {st.status === "PENDING" && (
+                        <div className="mt-2.5 flex items-center gap-2 pt-2 border-t border-slate-100">
+                          <Input
+                            placeholder="Approval remarks (optional)..."
+                            value={stageComments}
+                            onChange={(e) => setStageComments(e.target.value)}
+                            className="h-7 text-[11px] max-w-xs"
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={stageActionLoading}
+                            onClick={() => handleApproveStage(st.id)}
+                            className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                          >
+                            <Check className="h-3 w-3 mr-1" /> Approve Stage
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={stageActionLoading}
+                            onClick={() => setHoldingStageId(st.id)}
+                            className="h-7 text-xs border-red-300 text-red-700 hover:bg-red-50"
+                          >
+                            <AlertTriangle className="h-3 w-3 mr-1" /> Hold Stage
+                          </Button>
+                        </div>
+                      )}
+
+                      {st.status === "ON_HOLD" && (
+                        <div className="mt-2 flex items-center gap-2 pt-2 border-t border-red-100">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={stageActionLoading}
+                            onClick={() => setReleasingStageId(st.id)}
+                            className="h-7 text-xs bg-red-700 hover:bg-red-800 text-white font-bold"
+                          >
+                            Release Stage Hold
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 3. CRM Follow-Up Ledger */}
+            <div className="space-y-3 pt-3 border-t border-slate-200">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+                <PhoneCall className="h-4 w-4 text-royal" /> Collections CRM & Touchpoint History
+              </span>
+
+              {/* Log new CRM touchpoint form */}
+              <form onSubmit={handleCreateFollowUp} className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70 space-y-3">
+                <div className="grid grid-cols-4 gap-2">
+                  <div>
+                    <Label className="text-[10px] font-bold text-slate-700">Channel *</Label>
+                    <select
+                      value={crmChannel}
+                      onChange={(e) => setCrmChannel(e.target.value)}
+                      className="mt-1 h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs"
+                    >
+                      <option value="PHONE">PHONE</option>
+                      <option value="EMAIL">EMAIL</option>
+                      <option value="IN_PERSON">IN_PERSON</option>
+                      <option value="PORTAL">PORTAL</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-[10px] font-bold text-slate-700">Contacted Person</Label>
+                    <Input
+                      placeholder="e.g. Ramesh Accounts"
+                      value={crmContactedPerson}
+                      onChange={(e) => setCrmContactedPerson(e.target.value)}
+                      className="mt-1 h-8 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-[10px] font-bold text-slate-700">Outcome</Label>
+                    <select
+                      value={crmOutcome}
+                      onChange={(e) => setCrmOutcome(e.target.value)}
+                      className="mt-1 h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs"
+                    >
+                      <option value="PROMISE_TO_PAY">PROMISE_TO_PAY</option>
+                      <option value="DISPUTE_RAISED">DISPUTE_RAISED</option>
+                      <option value="SENT_REMINDER">SENT_REMINDER</option>
+                      <option value="ESCALATED">ESCALATED</option>
+                      <option value="OTHER">OTHER</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-[10px] font-bold text-slate-700">Next Follow-Up</Label>
+                    <Input
+                      type="date"
+                      value={crmNextDate}
+                      onChange={(e) => setCrmNextDate(e.target.value)}
+                      className="mt-1 h-8 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Touchpoint notes / customer promise details..."
+                    value={crmNotes}
+                    onChange={(e) => setCrmNotes(e.target.value)}
+                    className="h-8 text-xs flex-1"
+                  />
+                  <Button type="submit" disabled={crmLoading} size="sm" className="h-8 bg-royal text-white text-xs font-bold px-3">
+                    {crmLoading ? "Logging..." : "Log CRM Touchpoint"}
+                  </Button>
+                </div>
+              </form>
+
+              {/* Past follow-ups list */}
+              <div className="space-y-2">
+                {invoiceFollowUps.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-2">No previous CRM follow-up logs recorded.</p>
+                ) : (
+                  invoiceFollowUps.map((fu, idx) => (
+                    <div key={fu.id || idx} className="p-2.5 rounded border border-slate-200 bg-white text-xs space-y-1">
+                      <div className="flex items-center justify-between font-mono">
+                        <span className="font-bold text-slate-800">
+                          [{fu.channel}] {fu.contactedPerson ?? "Client AP"} · Outcome: <strong className="text-royal">{fu.outcome ?? "—"}</strong>
+                        </span>
+                        <span className="text-[10px] text-slate-500">{formatDate(fu.createdAt as any)}</span>
+                      </div>
+                      {fu.notes && <p className="text-[11px] text-slate-600 mb-0 italic">&ldquo;{fu.notes}&rdquo;</p>}
+                      {fu.nextFollowUpDate && (
+                        <div className="text-[10px] font-mono text-amber-700">Next Follow-Up On: {fu.nextFollowUpDate}</div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* 4. Record Payment Settlement */}
+            <div className="space-y-3 pt-3 border-t border-slate-200">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+                <CreditCard className="h-4 w-4 text-emerald-600" /> Record Financial Payment Settlement
+              </span>
+
+              {selectedInvoice?.status === "PAID" ? (
+                <div className="p-3 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 font-bold text-xs flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4" /> Invoice is fully paid and settled.
+                </div>
+              ) : (
+                <form onSubmit={handleRecordPayment} className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70 space-y-3">
+                  <div className="grid grid-cols-4 gap-2">
+                    <div>
+                      <Label className="text-[10px] font-bold text-slate-700">Payment Amount (₹) *</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        placeholder="Amount in Rupees"
+                        value={paymentAmount}
+                        onChange={(e) => setPaymentAmount(e.target.value)}
+                        className="mt-1 h-8 text-xs"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[10px] font-bold text-slate-700">Method *</Label>
+                      <select
+                        value={paymentMethod}
+                        onChange={(e) => setPaymentMethod(e.target.value)}
+                        className="mt-1 h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs"
+                      >
+                        <option value="NEFT">NEFT</option>
+                        <option value="RTGS">RTGS</option>
+                        <option value="UPI">UPI</option>
+                        <option value="CHEQUE">CHEQUE</option>
+                        <option value="CASH">CASH</option>
+                      </select>
+                    </div>
+                    <div>
+                      <Label className="text-[10px] font-bold text-slate-700">UTR / Reference No</Label>
+                      <Input
+                        placeholder="e.g. UTR-98234123"
+                        value={paymentReference}
+                        onChange={(e) => setPaymentReference(e.target.value)}
+                        className="mt-1 h-8 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[10px] font-bold text-slate-700">Payment Date</Label>
+                      <Input
+                        type="date"
+                        value={paymentDate}
+                        onChange={(e) => setPaymentDate(e.target.value)}
+                        className="mt-1 h-8 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-1">
+                    <Button type="submit" disabled={paymentLoading} size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4">
+                      {paymentLoading ? "Recording..." : "Record Payment & Settle"}
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end">
+            <Button type="button" variant="outline" size="sm" onClick={() => setIsInvoiceDetailOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* HOLD STAGE MODAL */}
+      <Dialog open={Boolean(holdingStageId)} onOpenChange={(open) => !open && setHoldingStageId(null)}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden border-slate-200 shadow-xl">
+          <DialogHeader className="p-5 border-b border-slate-200 bg-red-50/60">
+            <div className="flex items-center space-x-2">
+              <AlertTriangle className="h-5 w-5 text-red-600" />
+              <DialogTitle className="text-base font-semibold text-red-950">Place Approval Stage on Hold</DialogTitle>
+            </div>
+          </DialogHeader>
+
+          <form onSubmit={handleHoldStage}>
+            <div className="p-5 space-y-3">
+              <div>
+                <Label htmlFor="stageHoldReason" className="text-xs font-bold text-slate-800">Hold Reason *</Label>
+                <select
+                  id="stageHoldReason"
+                  value={stageHoldReason}
+                  onChange={(e) => setStageHoldReason(e.target.value)}
+                  className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs text-slate-900"
+                >
+                  <option value="DISPUTED_LINE">DISPUTED_LINE - Client disputes specific charge line</option>
+                  <option value="RATE_CARD_MISMATCH">RATE_CARD_MISMATCH - Freight calculated differs from contract</option>
+                  <option value="DOCUMENT_MISSING">DOCUMENT_MISSING - Supporting voucher/challan not attached</option>
+                  <option value="OTHER">OTHER - Custom approval exception</option>
+                </select>
+              </div>
+
+              <div>
+                <Label htmlFor="stageHoldRemarks" className="text-xs font-bold text-slate-800">Remarks *</Label>
+                <Textarea
+                  id="stageHoldRemarks"
+                  rows={3}
+                  value={stageHoldRemarks}
+                  onChange={(e) => setStageHoldRemarks(e.target.value)}
+                  placeholder="Detail the dispute or discrepancy..."
+                  className="mt-1 text-xs border-slate-300"
+                  required
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end space-x-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setHoldingStageId(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={stageActionLoading} className="bg-red-600 hover:bg-red-700 text-white font-semibold">
+                {stageActionLoading ? "Submitting..." : "Confirm Stage Hold"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* RELEASE STAGE HOLD MODAL */}
+      <Dialog open={Boolean(releasingStageId)} onOpenChange={(open) => !open && setReleasingStageId(null)}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden border-slate-200 shadow-xl">
+          <DialogHeader className="p-5 border-b border-slate-200 bg-emerald-50/60">
+            <div className="flex items-center space-x-2">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+              <DialogTitle className="text-base font-semibold text-emerald-950">Release Stage Hold</DialogTitle>
+            </div>
+          </DialogHeader>
+
+          <form onSubmit={handleReleaseStageHold}>
+            <div className="p-5 space-y-3">
+              <div>
+                <Label htmlFor="stageReleaseRemarks" className="text-xs font-bold text-slate-800">Resolution Remarks *</Label>
+                <Textarea
+                  id="stageReleaseRemarks"
+                  rows={3}
+                  value={stageReleaseRemarks}
+                  onChange={(e) => setStageReleaseRemarks(e.target.value)}
+                  placeholder="Explain how the dispute was resolved with client..."
+                  className="mt-1 text-xs border-slate-300"
+                  required
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end space-x-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setReleasingStageId(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={stageActionLoading} className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">
+                {stageActionLoading ? "Submitting..." : "Confirm Release Hold"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

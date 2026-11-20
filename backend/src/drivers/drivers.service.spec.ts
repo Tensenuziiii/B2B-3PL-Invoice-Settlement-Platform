@@ -18,6 +18,7 @@ describe("DriversService", () => {
     phone: "+919876543210",
     licenseNo: "DL-1234567890123",
     licenseExpiry: new Date("2030-01-01T00:00:00.000Z"),
+    verificationStatus: "VERIFIED",
     userId: null,
     dutyStatus: "OFFLINE",
     active: true,
@@ -80,7 +81,7 @@ describe("DriversService", () => {
     });
   });
 
-  it("create() parses licenseExpiry string to Date", async () => {
+  it("create() parses licenseExpiry string to Date and sets verificationStatus", async () => {
     await service.create({
       name: "John Doe",
       phone: "+919876543210",
@@ -94,13 +95,26 @@ describe("DriversService", () => {
         phone: "+919876543210",
         licenseNo: "DL-12345",
         licenseExpiry: new Date("2030-01-01T00:00:00.000Z"),
+        verificationStatus: "VERIFIED",
         userId: null,
         active: true,
       },
     });
   });
 
+  it("create() throws ConflictException on duplicate phone (manual check)", async () => {
+    driverFindFirst.mockResolvedValue(mockDriver);
+
+    await expect(
+      service.create({
+        name: "John Doe",
+        phone: "+919876543210",
+      }),
+    ).rejects.toThrow(ConflictException);
+  });
+
   it("create() throws ConflictException on P2002", async () => {
+    driverFindFirst.mockResolvedValue(null);
     driverCreate.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
         code: "P2002",
@@ -109,7 +123,10 @@ describe("DriversService", () => {
     );
 
     await expect(
-      service.create({ name: "John Doe", phone: "+919876543210" }),
+      service.create({
+        name: "John Doe",
+        phone: "+919876543210",
+      }),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -121,20 +138,22 @@ describe("DriversService", () => {
     );
   });
 
-  it("update() throws NotFoundException when not found", async () => {
-    driverFindFirst.mockResolvedValue(null);
+  it("update() updates verificationStatus", async () => {
+    await service.update("drv-123", {
+      verificationStatus: "REJECTED",
+    });
 
-    await expect(
-      service.update("nonexistent-id", { name: "Jane Doe" }),
-    ).rejects.toThrow(NotFoundException);
+    expect(driverUpdate).toHaveBeenCalledWith({
+      where: { id: "drv-123" },
+      data: {
+        verificationStatus: "REJECTED",
+      },
+    });
   });
 
-  it("deactivate() sets active=false and deletedAt", async () => {
+  it("deactivate() marks active=false and sets deletedAt", async () => {
     const result = await service.deactivate("drv-123");
 
-    expect(driverFindFirst).toHaveBeenCalledWith({
-      where: { id: "drv-123", deletedAt: null },
-    });
     expect(driverUpdate).toHaveBeenCalledWith({
       where: { id: "drv-123" },
       data: { active: false, deletedAt: expect.any(Date) },

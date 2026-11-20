@@ -192,6 +192,34 @@ export default function DriverMobileWebApp() {
     });
   };
 
+  const tripStops = Array.isArray(trip?.tripStops)
+    ? (trip.tripStops as Array<Record<string, unknown>>)
+    : [];
+  const currentStop =
+    tripStops.find((s) => s.status !== "COMPLETED") || tripStops[0] || null;
+  const currentTripStopId = currentStop
+    ? String(currentStop.id || "stop-1")
+    : String((trip as any)?.currentStopId || (trip as any)?.stopId || "stop-1");
+
+  const upcomingStops = tripStops.filter((s) => s !== currentStop && s.status !== "COMPLETED");
+
+  const [transitioningStatus, setTransitioningStatus] = useState(false);
+
+  const advanceTripStatus = async (toStatus: string) => {
+    if (!trip) return;
+    setTransitioningStatus(true);
+    try {
+      await apiClient.post(`/trips/${trip.id}/status-transitions`, {
+        toStatus,
+      });
+      await fetchCurrentTrip();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to update trip status");
+    } finally {
+      setTransitioningStatus(false);
+    }
+  };
+
   const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -201,7 +229,12 @@ export default function DriverMobileWebApp() {
     try {
       const presign = await apiClient.post<{ url: string; s3Key: string }>(
         "/pods/presign-upload",
-        { contentType: file.type || "image/jpeg", sizeBytes: file.size }
+        {
+          tripStopId: currentTripStopId,
+          documentType: "PHOTO",
+          contentType: file.type || "image/jpeg",
+          sizeBytes: file.size,
+        }
       );
       await fetch(presign.url, {
         method: "PUT",
@@ -229,17 +262,6 @@ export default function DriverMobileWebApp() {
     }
   };
 
-  const tripStops = Array.isArray(trip?.tripStops)
-    ? (trip.tripStops as Array<Record<string, unknown>>)
-    : [];
-  const currentStop =
-    tripStops.find((s) => s.status !== "COMPLETED") || tripStops[0] || null;
-  const currentTripStopId = currentStop
-    ? String(currentStop.id || "stop-1")
-    : String((trip as any)?.currentStopId || (trip as any)?.stopId || "stop-1");
-
-  const upcomingStops = tripStops.filter((s) => s !== currentStop && s.status !== "COMPLETED");
-
   const handleConfirmDelivery = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!trip) return;
@@ -262,7 +284,12 @@ export default function DriverMobileWebApp() {
         if (sigBlob) {
           const sigPresign = await apiClient.post<{ url: string; s3Key: string }>(
             "/pods/presign-upload",
-            { contentType: "image/png", sizeBytes: sigBlob.size }
+            {
+              tripStopId,
+              documentType: "SIGNATURE",
+              contentType: "image/png",
+              sizeBytes: sigBlob.size,
+            }
           );
           await fetch(sigPresign.url, {
             method: "PUT",
@@ -270,6 +297,14 @@ export default function DriverMobileWebApp() {
             headers: { "Content-Type": "image/png" },
           });
           signatureS3Key = sigPresign.s3Key;
+          await apiClient.post("/pods", {
+            tripStopId,
+            documentType: "SIGNATURE",
+            s3Key: signatureS3Key,
+            contentType: "image/png",
+            sizeBytes: sigBlob.size,
+            signatoryName: receiverName.trim() || null,
+          });
         }
       }
 
@@ -283,20 +318,31 @@ export default function DriverMobileWebApp() {
         });
       }
 
-      // 3. Confirm POD
+      // 3. Confirm POD photo
       await apiClient.post("/pods", {
-        tripId,
         tripStopId,
+        documentType: "PHOTO",
         s3Key,
         contentType: selectedFile.type || "image/jpeg",
+        sizeBytes: selectedFile.size,
         signatoryName: receiverName.trim() || null,
-        ...(signatureS3Key ? { signatureS3Key } : {}),
       });
 
       // 4. Complete trip stop
       await apiClient.post(`/trips/${tripId}/stops/${tripStopId}/complete`);
 
-      // 5. Refetch current trip
+      // 5. If this was the last remaining stop, transition trip status to DELIVERED
+      if (upcomingStops.length === 0) {
+        try {
+          await apiClient.post(`/trips/${tripId}/status-transitions`, {
+            toStatus: "DELIVERED",
+          });
+        } catch {
+          // Non-blocking if trip is already DELIVERED
+        }
+      }
+
+      // 6. Refetch current trip
       await fetchCurrentTrip();
 
       // Close modal and show success
@@ -547,18 +593,60 @@ export default function DriverMobileWebApp() {
                   </div>
                 </div>
 
-                {/* ACTION TRIGGER BUTTON: High-Contrast Massive Touch Target */}
-                <div className="pt-2">
-                  {tripStage === "driving" ? (
+                {/* ACTION TRIGGER BUTTON: Canonical R1 One-Tap Lifecycle Actions */}
+                <div className="pt-2 space-y-2">
+                  {trip.status === "PLACED" && (
                     <Button
                       type="button"
-                      onClick={() => setTripStage("arrived")}
+                      disabled={transitioningStatus}
+                      onClick={() => advanceTripStatus("LOADING")}
+                      className="w-full py-6 h-auto text-xl font-black uppercase tracking-wide bg-amber-600 hover:bg-amber-700 text-white rounded-xl shadow-lg border-2 border-amber-600 active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+                    >
+                      <Package className="h-6 w-6" />
+                      {transitioningStatus ? "Updating..." : "Start Loading"}
+                    </Button>
+                  )}
+
+                  {trip.status === "LOADING" && (
+                    <Button
+                      type="button"
+                      disabled={transitioningStatus}
+                      onClick={() => advanceTripStatus("LOADED")}
+                      className="w-full py-6 h-auto text-xl font-black uppercase tracking-wide bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg border-2 border-indigo-600 active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+                    >
+                      <CheckCircle2 className="h-6 w-6" />
+                      {transitioningStatus ? "Updating..." : "Mark Loaded"}
+                    </Button>
+                  )}
+
+                  {trip.status === "LOADED" && (
+                    <Button
+                      type="button"
+                      disabled={transitioningStatus}
+                      onClick={() => advanceTripStatus("IN_TRANSIT")}
+                      className="w-full py-6 h-auto text-xl font-black uppercase tracking-wide bg-royal hover:bg-royal/90 text-white rounded-xl shadow-lg border-2 border-royal active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+                    >
+                      <Truck className="h-6 w-6" />
+                      {transitioningStatus ? "Updating..." : "Depart & Start Transit"}
+                    </Button>
+                  )}
+
+                  {trip.status === "IN_TRANSIT" && (
+                    <Button
+                      type="button"
+                      disabled={transitioningStatus}
+                      onClick={() => advanceTripStatus("UNLOADING")}
                       className="w-full py-6 h-auto text-xl font-black uppercase tracking-wide bg-royal hover:bg-royal/90 text-white rounded-xl shadow-lg border-2 border-royal active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
                     >
                       <MapPin className="h-6 w-6 animate-bounce" />
-                      Reached Destination
+                      {transitioningStatus ? "Updating..." : "Reached Stop / Unloading"}
                     </Button>
-                  ) : (
+                  )}
+
+                  {(trip.status === "UNLOADING" ||
+                    trip.status === "IN_PROGRESS" ||
+                    trip.status === "DELIVERY_IN_PROGRESS" ||
+                    !["PLACED", "LOADING", "LOADED", "IN_TRANSIT", "DELIVERED", "CLOSED"].includes(String(trip.status))) && (
                     <Button
                       type="button"
                       onClick={() => setIsPodModalOpen(true)}

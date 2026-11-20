@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, Max, Min, MinLength } from "class-validator";
+import { IsDateString, IsInt, IsOptional, IsString, IsUUID, Max, Min, MinLength } from "class-validator";
 import { Type } from "class-transformer";
 
 export class CreateVehicleDto {
@@ -22,4 +22,20 @@ export class CreateVehicleDto {
   @IsInt()
   @Min(0)
   currentOdometer?: number;
+
+  @IsOptional()
+  @IsUUID()
+  ownerId?: string;
+
+  @IsOptional()
+  @IsDateString()
+  insuranceExpiry?: string;
+
+  @IsOptional()
+  @IsDateString()
+  fitnessExpiry?: string;
+
+  @IsOptional()
+  @IsDateString()
+  pucExpiry?: string;
 }

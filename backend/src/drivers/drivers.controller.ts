@@ -15,35 +15,39 @@ import { DriversService } from "./drivers.service";
 @ApiBearerAuth()
 @Controller("drivers")
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN, Role.DISPATCH_MANAGER)
 export class DriversController {
   constructor(private readonly driversService: DriversService) {}
 
   @Get()
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.ACCOUNTS, Role.STAFF, Role.VIEWER)
   @ApiOperation({ summary: "List drivers with search and pagination" })
   list(@Query() query: ListDriversQueryDto) {
     return this.driversService.list(query);
   }
 
   @Get(":id")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.ACCOUNTS, Role.STAFF, Role.VIEWER)
   @ApiOperation({ summary: "Get a driver by id" })
   get(@Param("id") id: string) {
     return this.driversService.get(id);
   }
 
   @Post()
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.STAFF)
   @ApiOperation({ summary: "Create a driver" })
   create(@Body() dto: CreateDriverDto) {
     return this.driversService.create(dto);
   }
 
   @Patch(":id")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.STAFF)
   @ApiOperation({ summary: "Update a driver" })
   update(@Param("id") id: string, @Body() dto: UpdateDriverDto) {
     return this.driversService.update(id, dto);
   }
 
   @Delete(":id")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER)
   @ApiOperation({ summary: "Deactivate a driver (soft delete)" })
   deactivate(@Param("id") id: string) {
     return this.driversService.deactivate(id);

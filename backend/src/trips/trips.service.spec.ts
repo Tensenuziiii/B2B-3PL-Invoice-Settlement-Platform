@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { TripNumberService } from "./trip-number.service";
 import { TripsService } from "./trips.service";
@@ -93,6 +93,16 @@ describe("TripsService", () => {
         updateMany: tripUpdateMany,
         findUniqueOrThrow: tripFindUniqueOrThrow,
       },
+      tripAssignmentHistory: {
+        create: jest.fn().mockResolvedValue({ id: "tah-1" }),
+      },
+      tripException: {
+        create: jest.fn().mockResolvedValue({ id: "tex-1" }),
+      },
+      tripStatusEvent: {
+        create: jest.fn().mockResolvedValue({ id: "tse-1" }),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       tripStop: {
         findFirst: tripStopFindFirst,
         findMany: tripStopFindMany,
@@ -141,6 +151,9 @@ describe("TripsService", () => {
       driver: {
         findFirst: driverFindFirst,
       },
+      tripStatusEvent: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       $transaction: prismaTransaction,
     } as unknown as PrismaService;
 
@@ -148,7 +161,15 @@ describe("TripsService", () => {
       nextTripNumber,
     } as unknown as TripNumberService;
 
-    service = new TripsService(mockPrisma, mockTripNumberService);
+    const mockAssignmentGuardService = {
+      validateAssignment: jest.fn().mockResolvedValue({ warnings: [], overridden: false }),
+    } as any;
+
+    const mockPodControlService = {
+      ensurePodForTrip: jest.fn().mockResolvedValue({ id: "pod-auto" }),
+    } as any;
+
+    service = new TripsService(mockPrisma, mockTripNumberService, mockAssignmentGuardService, mockPodControlService);
   });
 
 
@@ -699,5 +720,113 @@ describe("TripsService", () => {
     });
     expect(result.data).toEqual([mockTrip]);
     expect(result.meta).toEqual({ total: 1, limit: 50, offset: 0 });
+  });
+
+  // ─── R1-TASK-3.1 transitionStatus tests ─────────────────────────────────────
+
+  describe("transitionStatus()", () => {
+    const adminUser = { sub: "usr-admin", role: "ADMIN" };
+    const driverUser = { sub: "usr-123", role: "DRIVER" };
+
+    it("39. valid PLACED → LOADING transition creates TripStatusEvent", async () => {
+      tripFindFirst.mockResolvedValueOnce({ ...mockTrip, status: "PLACED", startedAt: null });
+
+      await service.transitionStatus("trp-123", { toStatus: "LOADING" }, adminUser);
+
+      expect(mockTx.tripStatusEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            fromStatus: "PLACED",
+            toStatus: "LOADING",
+            actorId: "usr-admin",
+          }),
+        }),
+      );
+      expect(mockTx.trip.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: "LOADING" }),
+        }),
+      );
+    });
+
+    it("40. invalid DELIVERED → LOADING transition throws BadRequestException", async () => {
+      tripFindFirst.mockResolvedValueOnce({ ...mockTrip, status: "DELIVERED" });
+
+      await expect(
+        service.transitionStatus("trp-123", { toStatus: "LOADING" }, adminUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("41. DRIVER attempting non-driver-allowed transition throws ForbiddenException", async () => {
+      // ASSIGNED → CLOSED is not in DRIVER_ALLOWED_TRANSITIONS
+      tripFindFirst.mockResolvedValueOnce({ ...mockTrip, status: "ASSIGNED" });
+
+      await expect(
+        service.transitionStatus("trp-123", { toStatus: "CLOSED" }, driverUser),
+      ).rejects.toThrow(expect.objectContaining({ status: 403 }));
+    });
+
+    it("42. VEHICLE_REPLACED without newVehicleId throws BadRequestException", async () => {
+      tripFindFirst.mockResolvedValueOnce({ ...mockTrip, status: "IN_TRANSIT" });
+
+      await expect(
+        service.transitionStatus("trp-123", { toStatus: "VEHICLE_REPLACED" }, adminUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("43. VEHICLE_REPLACED with newVehicleId creates TripAssignmentHistory, TripException, and TripStatusEvent", async () => {
+      tripFindFirst.mockResolvedValueOnce({
+        ...mockTrip,
+        status: "IN_TRANSIT",
+        vehicleId: "veh-123",
+        driverId: "drv-123",
+      });
+
+      await service.transitionStatus(
+        "trp-123",
+        { toStatus: "VEHICLE_REPLACED", newVehicleId: "veh-999", reason: "Breakdown" },
+        adminUser,
+      );
+
+      expect(mockTx.tripAssignmentHistory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            previousVehicleId: "veh-123",
+            newVehicleId: "veh-999",
+          }),
+        }),
+      );
+      expect(mockTx.tripException.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ type: "VEHICLE_REPLACED" }),
+        }),
+      );
+      expect(mockTx.tripStatusEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ toStatus: "VEHICLE_REPLACED" }),
+        }),
+      );
+    });
+
+    it("44. same-status IN_TRANSIT → IN_TRANSIT records a TripException for exception", async () => {
+      tripFindFirst.mockResolvedValueOnce({ ...mockTrip, status: "IN_TRANSIT" });
+
+      await service.transitionStatus(
+        "trp-123",
+        { toStatus: "IN_TRANSIT", reason: "Exception note" },
+        adminUser,
+      );
+
+      expect(mockTx.tripException.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ type: "STATUS_EXCEPTION" }),
+        }),
+      );
+      expect(mockTx.tripStatusEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ fromStatus: "IN_TRANSIT", toStatus: "IN_TRANSIT" }),
+        }),
+      );
+    });
   });
 });

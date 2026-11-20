@@ -68,6 +68,12 @@ const LOGIN_PRESETS = [
     label: 'Platform Administrator',
     redirectPath: '/admin',
   },
+  {
+    email: 'partner@3pl-vendor.in',
+    role: Role.VENDOR_3PL,
+    label: '3PL Vendor Portal',
+    redirectPath: '/vendor-portal',
+  },
 ] as const;
 
 @Injectable()

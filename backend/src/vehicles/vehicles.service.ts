@@ -29,6 +29,11 @@ export class VehiclesService {
         orderBy: { createdAt: "desc" },
         take: limit,
         skip,
+        include: {
+          owner: {
+            select: { id: true, name: true, pan: true, partyType: true },
+          },
+        },
       }),
       this.prisma.vehicle.count({ where }),
     ]);
@@ -39,6 +44,11 @@ export class VehiclesService {
   async get(id: string): Promise<Vehicle> {
     const vehicle = await this.prisma.vehicle.findFirst({
       where: { id, deletedAt: null },
+      include: {
+        owner: {
+          select: { id: true, name: true, pan: true, partyType: true, phone: true },
+        },
+      },
     });
     if (!vehicle) throw new NotFoundException("Vehicle not found.");
     return vehicle;
@@ -50,6 +60,10 @@ export class VehiclesService {
       type: dto.type?.trim() || null,
       capacityKg: dto.capacityKg ?? null,
       currentOdometer: dto.currentOdometer ?? 0,
+      ownerId: dto.ownerId ?? null,
+      insuranceExpiry: dto.insuranceExpiry ? new Date(dto.insuranceExpiry) : null,
+      fitnessExpiry: dto.fitnessExpiry ? new Date(dto.fitnessExpiry) : null,
+      pucExpiry: dto.pucExpiry ? new Date(dto.pucExpiry) : null,
       active: true,
     } as Prisma.VehicleUncheckedCreateInput;
 
@@ -73,6 +87,16 @@ export class VehiclesService {
     if (dto.type !== undefined) data.type = dto.type?.trim() || null;
     if (dto.capacityKg !== undefined) data.capacityKg = dto.capacityKg;
     if (dto.currentOdometer !== undefined) data.currentOdometer = dto.currentOdometer;
+    if (dto.ownerId !== undefined) data.ownerId = dto.ownerId ?? null;
+    if (dto.insuranceExpiry !== undefined) {
+      data.insuranceExpiry = dto.insuranceExpiry ? new Date(dto.insuranceExpiry) : null;
+    }
+    if (dto.fitnessExpiry !== undefined) {
+      data.fitnessExpiry = dto.fitnessExpiry ? new Date(dto.fitnessExpiry) : null;
+    }
+    if (dto.pucExpiry !== undefined) {
+      data.pucExpiry = dto.pucExpiry ? new Date(dto.pucExpiry) : null;
+    }
     if (dto.active !== undefined) data.active = dto.active;
 
     try {

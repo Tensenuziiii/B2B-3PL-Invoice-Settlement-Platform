@@ -18,10 +18,18 @@ export type Role =
 export type UserStatus = "ACTIVE" | "INACTIVE" | "LOCKED";
 
 export type TripStatus =
+  | "PLACED"
+  | "LOADING"
+  | "LOADED"
+  | "IN_TRANSIT"
+  | "UNLOADING"
+  | "DELIVERED"
+  | "CLOSED"
+  | "CANCELLED"
+  | "VEHICLE_REPLACED"
   | "ASSIGNED"
   | "IN_PROGRESS"
   | "DELIVERY_IN_PROGRESS"
-  | "DELIVERED"
   | "AUDIT_PENDING"
   | "CORRECTION_REQUESTED"
   | "AUDITED"
@@ -29,13 +37,30 @@ export type TripStatus =
 
 export type TripStopStatus = "PENDING" | "IN_PROGRESS" | "DELIVERED" | "FAILED";
 
+export type PodStatus =
+  | "PENDING_DELIVERY"
+  | "SOFT_COPY_RECEIVED"
+  | "SOFT_COPY_CHECKED"
+  | "ORIGINAL_DISPATCHED"
+  | "ORIGINAL_RECEIVED"
+  | "SUBMITTED_TO_CLIENT"
+  | "ON_HOLD"
+  | "LOST"
+  | "DUPLICATE_REQUESTED"
+  | "ACKNOWLEDGED";
+
 export type PodDocumentType = "PHOTO" | "SIGNATURE" | "LR" | "OTHER";
 
 export type InvoiceStatus =
   | "DRAFT"
   | "SUBMITTED"
-  | "CLIENT_REVIEW"
+  | "IN_STAGE"
+  | "APPROVED_STAGE"
   | "APPROVED"
+  | "ON_HOLD"
+  | "FULLY_APPROVED"
+  | "PARTIALLY_PAID"
+  | "CLIENT_REVIEW"
   | "PAYMENT_QUEUED"
   | "PAID"
   | "REJECTED"
@@ -113,6 +138,57 @@ export type User = {
   client?: Client | null;
 };
 
+export type CustomerContact = {
+  id: string;
+  organizationId: string;
+  clientId: string;
+  name: string;
+  role?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  isPrimary: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ApprovalStageTemplate = {
+  id: string;
+  organizationId: string;
+  clientId: string;
+  sequence: number;
+  name: string;
+  slaHours: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CustomerDocumentRule = {
+  id: string;
+  organizationId: string;
+  clientId: string;
+  documentType: string;
+  isMandatory: boolean;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Owner = {
+  id: string;
+  organizationId: string;
+  name: string;
+  partyType: string;
+  pan?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  trucks?: Vehicle[];
+  trips?: Trip[];
+};
+
 export type Client = {
   id: string;
   organizationId: string;
@@ -121,6 +197,8 @@ export type Client = {
   gstin?: string | null;
   stateCode?: string | null;
   paymentTermsDays?: number;
+  creditDays?: number;
+  digitalPodEnabled?: boolean;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -130,6 +208,9 @@ export type Client = {
   trips?: Trip[];
   invoices?: Invoice[];
   rateCards?: RateCard[];
+  contacts?: CustomerContact[];
+  approvalTemplates?: ApprovalStageTemplate[];
+  documentRules?: CustomerDocumentRule[];
 };
 
 export type Vehicle = {
@@ -139,11 +220,16 @@ export type Vehicle = {
   type?: string | null;
   capacityKg?: number | null;
   currentOdometer: number;
+  ownerId?: string | null;
+  insuranceExpiry?: string | null;
+  fitnessExpiry?: string | null;
+  pucExpiry?: string | null;
   active: boolean;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
 
+  owner?: Owner | null;
   trips?: Trip[];
 };
 
@@ -154,6 +240,7 @@ export type Driver = {
   phone: string;
   licenseNo?: string | null;
   licenseExpiry?: string | null;
+  verificationStatus?: string | null;
   userId?: string | null;
   dutyStatus?: string | null;
   active: boolean;
@@ -500,5 +587,79 @@ export type Notification = {
   body: string;
   payload?: unknown;
   readAt?: string | null;
+  createdAt: string;
+};
+
+export type Pod = {
+  id: string;
+  organizationId: string;
+  tripId: string;
+  currentStatus: PodStatus;
+  holdReason?: string | null;
+  holdRemarks?: string | null;
+  courierName?: string | null;
+  courierTrackingNo?: string | null;
+  courierDispatchedAt?: string | null;
+  officeReceivedAt?: string | null;
+  officeReceivedBy?: string | null;
+  customerSubmittedAt?: string | null;
+  customerAcknowledgedAt?: string | null;
+  lossReportedAt?: string | null;
+  duplicateRequestedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+
+  trip?: Trip | null;
+  checkItems?: PodCheckItem[];
+  events?: PodEvent[];
+};
+
+export type PodCheckItem = {
+  id: string;
+  podId: string;
+  checkType: string;
+  passed: boolean;
+  remarks?: string | null;
+  checkedBy?: string | null;
+  createdAt: string;
+};
+
+export type PodEvent = {
+  id: string;
+  podId: string;
+  eventType: string;
+  fromStatus?: string | null;
+  toStatus: string;
+  actorId?: string | null;
+  notes?: string | null;
+  payload?: unknown;
+  createdAt: string;
+};
+
+export type InvoiceStage = {
+  id: string;
+  invoiceId: string;
+  stageName: string;
+  stageOrder: number;
+  approverRole: string;
+  status: string;
+  approvedAt?: string | null;
+  approvedById?: string | null;
+  comments?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type InvoiceFollowUp = {
+  id: string;
+  invoiceId: string;
+  contactedPerson?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  channel: string;
+  outcome?: string | null;
+  notes?: string | null;
+  nextFollowUpDate?: string | null;
+  actorId?: string | null;
   createdAt: string;
 };

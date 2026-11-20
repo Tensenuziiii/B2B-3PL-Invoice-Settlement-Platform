@@ -15,35 +15,39 @@ import { VehiclesService } from "./vehicles.service";
 @ApiBearerAuth()
 @Controller("vehicles")
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN, Role.DISPATCH_MANAGER)
 export class VehiclesController {
   constructor(private readonly vehiclesService: VehiclesService) {}
 
   @Get()
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.ACCOUNTS, Role.STAFF, Role.VIEWER)
   @ApiOperation({ summary: "List vehicles with search and pagination" })
   list(@Query() query: ListVehiclesQueryDto) {
     return this.vehiclesService.list(query);
   }
 
   @Get(":id")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.ACCOUNTS, Role.STAFF, Role.VIEWER)
   @ApiOperation({ summary: "Get a vehicle by id" })
   get(@Param("id") id: string) {
     return this.vehiclesService.get(id);
   }
 
   @Post()
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.STAFF)
   @ApiOperation({ summary: "Create a vehicle" })
   create(@Body() dto: CreateVehicleDto) {
     return this.vehiclesService.create(dto);
   }
 
   @Patch(":id")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.STAFF)
   @ApiOperation({ summary: "Update a vehicle" })
   update(@Param("id") id: string, @Body() dto: UpdateVehicleDto) {
     return this.vehiclesService.update(id, dto);
   }
 
   @Delete(":id")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER)
   @ApiOperation({ summary: "Deactivate a vehicle (soft delete)" })
   deactivate(@Param("id") id: string) {
     return this.vehiclesService.deactivate(id);

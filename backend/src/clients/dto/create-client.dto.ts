@@ -27,4 +27,14 @@ export class CreateClientDto {
   @Min(0)
   @Max(365)
   paymentTermsDays?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(365)
+  creditDays?: number;
+
+  @IsOptional()
+  digitalPodEnabled?: boolean;
 }

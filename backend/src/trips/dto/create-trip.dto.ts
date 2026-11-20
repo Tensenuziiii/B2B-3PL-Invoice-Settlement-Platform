@@ -48,6 +48,10 @@ export class CreateTripDto {
   @Min(0)
   odometerStart?: number;
 
+  @IsOptional()
+  @IsString()
+  assignmentOverrideReason?: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateTripStopDto)

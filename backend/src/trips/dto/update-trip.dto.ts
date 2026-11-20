@@ -8,4 +8,5 @@ export class UpdateTripDto {
   @IsOptional() @IsString() destination?: string;
   @IsOptional() @IsString() lrNumber?: string;
   @IsOptional() @IsDateString() eta?: string;
+  @IsOptional() @IsString() assignmentOverrideReason?: string;
 }

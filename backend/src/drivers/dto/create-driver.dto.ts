@@ -1,4 +1,4 @@
-import { IsDateString, IsOptional, IsPhoneNumber, IsString, IsUUID, MinLength } from "class-validator";
+import { IsDateString, IsIn, IsOptional, IsPhoneNumber, IsString, IsUUID, MinLength } from "class-validator";
 
 export class CreateDriverDto {
   @IsString()
@@ -16,6 +16,10 @@ export class CreateDriverDto {
   @IsOptional()
   @IsDateString()
   licenseExpiry?: string;
+
+  @IsOptional()
+  @IsIn(["UNVERIFIED", "VERIFIED", "REJECTED"])
+  verificationStatus?: string;
 
   @IsOptional()
   @IsUUID()

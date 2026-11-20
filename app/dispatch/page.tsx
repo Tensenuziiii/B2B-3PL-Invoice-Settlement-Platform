@@ -29,7 +29,7 @@ import {
   Users,
 } from "lucide-react";
 
-type TripFilter = "All trips" | "In transit" | "Delayed" | "At hub";
+type TripFilter = "All trips" | "In transit" | "Delayed" | "PODs on hold" | "At hub";
 
 const navigation = [
   { label: "Overview", href: "/dispatch", icon: LayoutDashboard },
@@ -40,7 +40,85 @@ const navigation = [
   { label: "Administration", href: "/admin", icon: Settings2 },
 ];
 
-const filters: TripFilter[] = ["All trips", "In transit", "Delayed", "At hub"];
+const filters: TripFilter[] = ["All trips", "In transit", "Delayed", "PODs on hold", "At hub"];
+
+interface OperationalSummary {
+  activeTrips: {
+    count: number;
+    delayedCount: number;
+    trips: Array<{
+      id: string;
+      tripNumber: string;
+      status: string;
+      origin: string;
+      destination: string;
+      eta: string | null;
+      delayMinutes: number;
+      isDelayed: boolean;
+      vehicleRegNo?: string;
+      driverName?: string;
+      clientName?: string;
+    }>;
+  };
+  pendingPods: {
+    count: number;
+    overdueCount: number;
+    pods: Array<{
+      id: string;
+      tripId: string;
+      tripNumber: string;
+      currentStatus: string;
+      deliveredAt: string | null;
+      clientName?: string;
+      agingHours: number;
+      isOverdue: boolean;
+    }>;
+  };
+  podsOnHold: {
+    count: number;
+    pods: Array<{
+      id: string;
+      tripId: string;
+      tripNumber: string;
+      holdReason: string | null;
+      holdRemarks: string | null;
+      updatedAt: string;
+      clientName?: string;
+    }>;
+  };
+  originalPods: {
+    inTransitCount: number;
+    lostCount: number;
+    duplicateRequestedCount: number;
+    pods: Array<{
+      id: string;
+      tripId: string;
+      tripNumber: string;
+      currentStatus: string;
+      courierName: string | null;
+      courierTrackingNo: string | null;
+      courierDispatchedAt: string | null;
+      clientName?: string;
+    }>;
+  };
+  invoicesNeedingFollowUp: {
+    count: number;
+    overdueCount: number;
+    invoices: Array<{
+      id: string;
+      invoiceNumber: string;
+      status: string;
+      dueDate: string | null;
+      totalPaise: number;
+      clientName?: string;
+      isOverdue: boolean;
+      needsFollowUp: boolean;
+      lastContactedOn?: string | null;
+      nextFollowUpOn?: string | null;
+      lastOutcome?: string | null;
+    }>;
+  };
+}
 
 function formatStatus(status: string) {
   if (status === "IN_PROGRESS") return "In transit";
@@ -78,6 +156,7 @@ export default function DispatchPage() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<{ role?: string } | null>(null);
   const [trips, setTrips] = useState<Trip[]>([]);
+  const [summary, setSummary] = useState<OperationalSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -125,8 +204,16 @@ export default function DispatchPage() {
 
   const fetchTrips = async () => {
     try {
-      const res = await apiClient.get<Paginated<Trip>>("/trips?status=active");
-      setTrips(res.data);
+      const [tripsRes, summaryRes] = await Promise.allSettled([
+        apiClient.get<Paginated<Trip>>("/trips?status=active"),
+        apiClient.get<OperationalSummary>("/dashboard/summary"),
+      ]);
+      if (tripsRes.status === "fulfilled") {
+        setTrips(tripsRes.value.data);
+      }
+      if (summaryRes.status === "fulfilled") {
+        setSummary(summaryRes.value);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load trips");
     } finally {
@@ -138,8 +225,18 @@ export default function DispatchPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await apiClient.get<Paginated<Trip>>("/trips?status=active");
-        if (!cancelled) setTrips(res.data);
+        const [tripsRes, summaryRes] = await Promise.allSettled([
+          apiClient.get<Paginated<Trip>>("/trips?status=active"),
+          apiClient.get<OperationalSummary>("/dashboard/summary"),
+        ]);
+        if (!cancelled) {
+          if (tripsRes.status === "fulfilled") {
+            setTrips(tripsRes.value.data);
+          }
+          if (summaryRes.status === "fulfilled") {
+            setSummary(summaryRes.value);
+          }
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof ApiError ? err.message : "Failed to load trips");
       } finally {
@@ -226,9 +323,10 @@ export default function DispatchPage() {
     const matchesFilter =
       activeFilter === "All trips" ||
       tripStatus.toLowerCase() === activeFilter.toLowerCase() ||
-      (activeFilter === "In transit" && (tripStatus === "IN_PROGRESS" || tripStatus === "In transit" || tripStatus === "DISPATCHED")) ||
-      (activeFilter === "Delayed" && (tripStatus === "DELAYED" || tripStatus === "Delayed")) ||
-      (activeFilter === "At hub" && (tripStatus === "Unloading" || tripStatus === "EOD pending" || tripStatus === "EOD_PENDING" || tripStatus === "POD_SUBMITTED"));
+      (activeFilter === "In transit" && (tripStatus === "IN_PROGRESS" || tripStatus === "IN_TRANSIT" || tripStatus === "In transit" || tripStatus === "DISPATCHED" || tripStatus === "LOADED")) ||
+      (activeFilter === "Delayed" && (tripStatus === "DELAYED" || tripStatus === "Delayed" || (trip.delayMinutes && trip.delayMinutes > 0))) ||
+      (activeFilter === "PODs on hold" && summary?.podsOnHold.pods.some((p) => p.tripId === trip.id)) ||
+      (activeFilter === "At hub" && (tripStatus === "Unloading" || tripStatus === "UNLOADING" || tripStatus === "EOD pending" || tripStatus === "EOD_PENDING" || tripStatus === "POD_SUBMITTED"));
     const searchText = `${trip.id ?? ""} ${trip.tripNumber ?? ""} ${getDisplayName(trip.vehicle)} ${getDisplayName(trip.driver)} ${trip.origin ?? ""} ${trip.destination ?? ""} ${getDisplayName(trip.client)}`.toLowerCase();
     return matchesFilter && searchText.includes(query.trim().toLowerCase());
   });
@@ -237,41 +335,42 @@ export default function DispatchPage() {
     t.tripStops?.reduce((s, st) => s + (st.expectedCollection ?? 0), 0) ??
     (typeof (t as any).expectedCollection === "number" ? (t as any).expectedCollection : Number((t as any).expectedCollection) || 0);
 
-  const liveDispatched = trips.filter((t) => t.status === "IN_PROGRESS").length;
-  const expectedCODInbound = trips.reduce(
-    (sum, t) => sum + getTripExpectedCollection(t),
-    0
-  );
-  const pendingEODAudit = trips.filter((t) => t.status === "AUDIT_PENDING" || (t.status as string) === "EOD_PENDING").length;
-  const delivered = trips.filter((t) => t.status === "DELIVERED").length;
+  const liveDispatched = summary?.activeTrips.count ?? trips.filter((t) => t.status === "IN_PROGRESS" || t.status === "IN_TRANSIT").length;
+  const delayedCount = summary?.activeTrips.delayedCount ?? 0;
+  const pendingPodsCount = summary?.pendingPods.count ?? 0;
+  const overduePodsCount = summary?.pendingPods.overdueCount ?? 0;
+  const podsOnHoldCount = summary?.podsOnHold.count ?? 0;
+  const invoicesFollowUpCount = summary?.invoicesNeedingFollowUp.count ?? 0;
+  const invoicesOverdueCount = summary?.invoicesNeedingFollowUp.overdueCount ?? 0;
+  const pendingAuditBadge = podsOnHoldCount + overduePodsCount;
 
   const metrics = [
     {
-      label: "Live Dispatched",
+      label: "Active Trips",
       value: String(liveDispatched).padStart(2, "0"),
-      detail: "Currently in movement",
+      detail: `${delayedCount} delayed`,
       icon: Truck,
       tone: "blue",
     },
     {
-      label: "Expected COD Inbound",
-      value: formatRupees(expectedCODInbound),
-      detail: "Across active manifests",
-      icon: Banknote,
+      label: "PODs Pending",
+      value: String(pendingPodsCount).padStart(2, "0"),
+      detail: `${overduePodsCount} overdue (>24h SLA)`,
+      icon: Clock3,
       tone: "cyan",
     },
     {
-      label: "Delivered",
-      value: String(delivered).padStart(2, "0"),
-      detail: "Successfully completed",
-      icon: CheckCircle2,
+      label: "PODs On Hold",
+      value: String(podsOnHoldCount).padStart(2, "0"),
+      detail: podsOnHoldCount > 0 ? "Requires action" : "All cleared",
+      icon: AlertTriangle,
       tone: "amber",
     },
     {
-      label: "Pending EOD Audit",
-      value: String(pendingEODAudit).padStart(2, "0"),
-      detail: "Ready for reconciliation",
-      icon: FileCheck2,
+      label: "Invoices Follow-Up",
+      value: String(invoicesFollowUpCount).padStart(2, "0"),
+      detail: `${invoicesOverdueCount} payment overdue`,
+      icon: Banknote,
       tone: "green",
     },
   ];
@@ -302,7 +401,7 @@ export default function DispatchPage() {
               >
                 <Icon className={`h-4 w-4 ${isActive ? "text-white" : "text-slate-400"}`} />
                 {label}
-                {label === "Audit Desk" && pendingEODAudit > 0 && <span className="ml-auto rounded-full bg-magenta px-2.5 py-0.5 text-xs font-bold text-white">{pendingEODAudit}</span>}
+                {label === "Audit Desk" && pendingAuditBadge > 0 && <span className="ml-auto rounded-full bg-magenta px-2.5 py-0.5 text-xs font-bold text-white">{pendingAuditBadge}</span>}
               </Link>
             );
           })}
@@ -516,18 +615,45 @@ export default function DispatchPage() {
                   <span className="grid h-9 w-9 place-items-center rounded-lg bg-magenta/15 text-magenta"><AlertTriangle className="h-5 w-5" /></span>
                 </div>
                 <div className="mt-4 divide-y divide-slate-100">
-                  <div className="flex gap-3 py-3.5">
-                    <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-magenta/10 text-magenta"><Clock3 className="h-4 w-4" /></span>
-                    <div>
-                      <div className="text-xs font-bold text-void">Arrival tracking</div>
-                      <p className="mb-0 mt-1 text-xs leading-4 text-slate-500">Check live transit routes and arrival milestones.</p>
+                  {summary?.podsOnHold.count ? (
+                    <div className="flex gap-3 py-3.5">
+                      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-500/10 text-amber-600"><AlertTriangle className="h-4 w-4" /></span>
+                      <div>
+                        <div className="text-xs font-bold text-void">{summary.podsOnHold.count} POD(s) on hold</div>
+                        <p className="mb-0 mt-1 text-xs leading-4 text-slate-500">
+                          {summary.podsOnHold.pods[0]?.holdReason ?? "Checklist verification failure"}
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  ) : null}
+
+                  {summary?.invoicesNeedingFollowUp.overdueCount ? (
+                    <div className="flex gap-3 py-3.5">
+                      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-magenta/10 text-magenta"><Clock3 className="h-4 w-4" /></span>
+                      <div>
+                        <div className="text-xs font-bold text-void">{summary.invoicesNeedingFollowUp.overdueCount} Overdue Invoice(s)</div>
+                        <p className="mb-0 mt-1 text-xs leading-4 text-slate-500">Past payment due date. Follow-up required.</p>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {summary?.originalPods.lostCount ? (
+                    <div className="flex gap-3 py-3.5">
+                      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-red-500/10 text-red-600"><AlertTriangle className="h-4 w-4" /></span>
+                      <div>
+                        <div className="text-xs font-bold text-void">{summary.originalPods.lostCount} Original POD(s) lost</div>
+                        <p className="mb-0 mt-1 text-xs leading-4 text-slate-500">Duplicate requested from customer.</p>
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="flex gap-3 py-3.5">
-                    <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-royal/10 text-royal"><FileCheck2 className="h-4 w-4" /></span>
+                    <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-royal/10 text-royal"><Clock3 className="h-4 w-4" /></span>
                     <div>
-                      <div className="text-xs font-bold text-void">EOD reconciliation due</div>
-                      <p className="mb-0 mt-1 text-xs leading-4 text-slate-500">Reconcile tolls, fuel, and actual cash on completion.</p>
+                      <div className="text-xs font-bold text-void">Arrival & Delay Tracking</div>
+                      <p className="mb-0 mt-1 text-xs leading-4 text-slate-500">
+                        {summary?.activeTrips.delayedCount ?? 0} delayed active trip(s) across network.
+                      </p>
                     </div>
                   </div>
                 </div>

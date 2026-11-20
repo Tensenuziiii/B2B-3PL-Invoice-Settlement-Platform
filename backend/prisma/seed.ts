@@ -190,6 +190,19 @@ async function main() {
   const rolePermissionMap: Record<Role, string[]> = {
     ADMIN: permissions.map((p) => p.code),
 
+    STAFF: [
+      "trips:read", "trips:create", "trips:assign", "trips:update_status",
+      "pods:upload", "collections:record", "expenses:record", "eod:close",
+      "vehicles:manage", "drivers:manage", "routes:manage", "clients:manage",
+      "vendors:manage", "rate_cards:manage", "audits:read", "audits:review",
+      "invoices:read", "invoices:create", "payments:record", "settlements:read",
+      "settlements:create", "notifications:read",
+    ],
+
+    VIEWER: [
+      "trips:read", "invoices:read", "audits:read", "settlements:read", "notifications:read",
+    ],
+
     DISPATCH_MANAGER: [
       "trips:read", "trips:create", "trips:assign", "trips:update_status",
       "pods:upload", "collections:record", "expenses:record", "eod:close",

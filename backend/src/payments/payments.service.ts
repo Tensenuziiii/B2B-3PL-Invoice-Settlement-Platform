@@ -3,7 +3,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { requireTenant } from "../core/tenant/tenant.context";
 import { RecordPaymentDto } from "./dto/record-payment.dto";
 
-const PAYABLE_STATUSES = ["APPROVED", "PAYMENT_QUEUED"];
+const PAYABLE_STATUSES = ["APPROVED", "FULLY_APPROVED", "PAYMENT_QUEUED", "PARTIALLY_PAID"];
 
 @Injectable()
 export class PaymentsService {
@@ -56,7 +56,7 @@ export class PaymentsService {
       const totalPaid = allPayments.reduce((s, p) => s + p.amount, 0);
 
       let newStatus = invoice.status;
-      if (invoice.status === "APPROVED") {
+      if (invoice.status === "APPROVED" || invoice.status === "FULLY_APPROVED") {
         newStatus = "PAYMENT_QUEUED";
       }
       if (totalPaid >= invoice.total) {

@@ -10,6 +10,9 @@ import { PaymentsService } from "../payments/payments.service";
 import { GenerateInvoiceDto } from "../billing/dto/generate-invoice.dto";
 import { ListInvoicesQueryDto } from "./dto/list-invoices-query.dto";
 import { InvoiceActionDto } from "./dto/invoice-action.dto";
+import { GenerateFromPodDto } from "./dto/generate-from-pod.dto";
+import { ApproveStageDto, HoldStageDto, ReleaseStageHoldDto } from "./dto/stage-action.dto";
+import { CreateFollowUpDto } from "./dto/create-follow-up.dto";
 import { RecordPaymentDto } from "../payments/dto/record-payment.dto";
 
 @ApiTags("invoices")
@@ -24,7 +27,7 @@ export class InvoicesController {
   ) {}
 
   @Get()
-  @Roles(Role.ADMIN, Role.ACCOUNTS, Role.CLIENT_AP)
+  @Roles(Role.ADMIN, Role.ACCOUNTS, Role.STAFF, Role.VIEWER, Role.CLIENT_AP)
   @ApiOperation({ summary: "List invoices" })
   list(@Query() query: ListInvoicesQueryDto, @Req() req: any) {
     // CLIENT_AP users are scoped to their own client — inject clientId filter if applicable
@@ -34,8 +37,16 @@ export class InvoicesController {
     return this.invoicesService.list(query);
   }
 
+  @Post("generate-from-pod")
+  @HttpCode(HttpStatus.CREATED)
+  @Roles(Role.ADMIN, Role.ACCOUNTS, Role.STAFF)
+  @ApiOperation({ summary: "Generate invoice from a verified POD with stage templates" })
+  generateFromPod(@Body() dto: GenerateFromPodDto, @Req() req: any) {
+    return this.invoicesService.generateFromPod(dto, req.user.sub);
+  }
+
   @Get(":id/payments")
-  @Roles(Role.ADMIN, Role.ACCOUNTS, Role.CLIENT_AP)
+  @Roles(Role.ADMIN, Role.ACCOUNTS, Role.STAFF, Role.VIEWER, Role.CLIENT_AP)
   @ApiOperation({ summary: "List payments for an invoice" })
   listPayments(@Param("id") id: string) {
     return this.paymentsService.listForInvoice(id);
@@ -58,7 +69,7 @@ export class InvoicesController {
   }
 
   @Get(":id")
-  @Roles(Role.ADMIN, Role.ACCOUNTS, Role.CLIENT_AP)
+  @Roles(Role.ADMIN, Role.ACCOUNTS, Role.STAFF, Role.VIEWER, Role.CLIENT_AP)
   @ApiOperation({ summary: "Get invoice detail" })
   get(@Param("id") id: string) {
     return this.invoicesService.get(id);
@@ -109,5 +120,74 @@ export class InvoicesController {
   @ApiOperation({ summary: "Cancel invoice (DRAFT → CANCELLED, soft delete)" })
   cancel(@Param("id") id: string, @Body() dto: InvoiceActionDto, @Req() req: any) {
     return this.invoicesService.cancel(id, dto, req.user);
+  }
+
+  // ─── Approval Stages (R1-TASK-6.2) ──────────────────────────────────────────
+
+  @Get(":id/stages")
+  @Roles(Role.ADMIN, Role.ACCOUNTS, Role.STAFF, Role.VIEWER, Role.CLIENT_AP)
+  @ApiOperation({ summary: "List approval stages for an invoice" })
+  listStages(@Param("id") id: string) {
+    return this.invoicesService.listStages(id);
+  }
+
+  @Post(":id/stages/:stageId/approve")
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.ADMIN, Role.ACCOUNTS, Role.STAFF)
+  @ApiOperation({ summary: "Approve an invoice approval stage" })
+  approveStage(
+    @Param("id") id: string,
+    @Param("stageId") stageId: string,
+    @Body() dto: ApproveStageDto,
+    @Req() req: any,
+  ) {
+    return this.invoicesService.approveStage(id, stageId, dto, req.user.sub);
+  }
+
+  @Post(":id/stages/:stageId/hold")
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.ADMIN, Role.ACCOUNTS, Role.STAFF)
+  @ApiOperation({ summary: "Place an invoice approval stage on hold" })
+  holdStage(
+    @Param("id") id: string,
+    @Param("stageId") stageId: string,
+    @Body() dto: HoldStageDto,
+    @Req() req: any,
+  ) {
+    return this.invoicesService.holdStage(id, stageId, dto, req.user.sub);
+  }
+
+  @Post(":id/stages/:stageId/release-hold")
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.ADMIN, Role.ACCOUNTS, Role.STAFF)
+  @ApiOperation({ summary: "Release hold on an invoice approval stage" })
+  releaseStageHold(
+    @Param("id") id: string,
+    @Param("stageId") stageId: string,
+    @Body() dto: ReleaseStageHoldDto,
+    @Req() req: any,
+  ) {
+    return this.invoicesService.releaseStageHold(id, stageId, dto, req.user.sub);
+  }
+
+  // ─── Follow-Up CRM (R1-TASK-6.2) ───────────────────────────────────────────
+
+  @Get(":id/follow-ups")
+  @Roles(Role.ADMIN, Role.ACCOUNTS, Role.STAFF, Role.VIEWER)
+  @ApiOperation({ summary: "List follow-up log entries for an invoice" })
+  listFollowUps(@Param("id") id: string) {
+    return this.invoicesService.listFollowUps(id);
+  }
+
+  @Post(":id/follow-ups")
+  @HttpCode(HttpStatus.CREATED)
+  @Roles(Role.ADMIN, Role.ACCOUNTS, Role.STAFF)
+  @ApiOperation({ summary: "Record a follow-up action/call/email on an invoice" })
+  createFollowUp(
+    @Param("id") id: string,
+    @Body() dto: CreateFollowUpDto,
+    @Req() req: any,
+  ) {
+    return this.invoicesService.createFollowUp(id, dto, req.user.sub);
   }
 }

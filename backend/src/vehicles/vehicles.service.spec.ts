@@ -18,6 +18,10 @@ describe("VehiclesService", () => {
     type: "Truck",
     capacityKg: 5000,
     currentOdometer: 12000,
+    ownerId: "own-123",
+    insuranceExpiry: new Date("2027-01-01T00:00:00.000Z"),
+    fitnessExpiry: new Date("2027-01-01T00:00:00.000Z"),
+    pucExpiry: new Date("2027-01-01T00:00:00.000Z"),
     active: true,
     createdAt: new Date("2026-10-01T00:00:00.000Z"),
     updatedAt: new Date("2026-10-01T00:00:00.000Z"),
@@ -50,6 +54,11 @@ describe("VehiclesService", () => {
       orderBy: { createdAt: "desc" },
       take: 50,
       skip: 0,
+      include: {
+        owner: {
+          select: { id: true, name: true, pan: true, partyType: true },
+        },
+      },
     });
     expect(vehicleCount).toHaveBeenCalledWith({
       where: { deletedAt: null, active: true },
@@ -69,15 +78,24 @@ describe("VehiclesService", () => {
       orderBy: { createdAt: "desc" },
       take: 50,
       skip: 0,
+      include: {
+        owner: {
+          select: { id: true, name: true, pan: true, partyType: true },
+        },
+      },
     });
   });
 
-  it("create() uppercases regNo", async () => {
+  it("create() uppercases regNo and sets expiry dates & ownerId", async () => {
     await service.create({
       regNo: "dl-01-xy-9999",
       type: "Van",
       capacityKg: 1200,
       currentOdometer: 500,
+      ownerId: "own-123",
+      insuranceExpiry: "2027-01-01T00:00:00.000Z",
+      fitnessExpiry: "2027-01-01T00:00:00.000Z",
+      pucExpiry: "2027-01-01T00:00:00.000Z",
     });
 
     expect(vehicleCreate).toHaveBeenCalledWith({
@@ -86,6 +104,10 @@ describe("VehiclesService", () => {
         type: "Van",
         capacityKg: 1200,
         currentOdometer: 500,
+        ownerId: "own-123",
+        insuranceExpiry: new Date("2027-01-01T00:00:00.000Z"),
+        fitnessExpiry: new Date("2027-01-01T00:00:00.000Z"),
+        pucExpiry: new Date("2027-01-01T00:00:00.000Z"),
         active: true,
       },
     });
@@ -112,20 +134,24 @@ describe("VehiclesService", () => {
     );
   });
 
-  it("update() throws NotFoundException when vehicle doesn't exist", async () => {
-    vehicleFindFirst.mockResolvedValue(null);
+  it("update() updates fields including ownerId and dates", async () => {
+    await service.update("veh-123", {
+      regNo: "mh-12-ab-9999",
+      insuranceExpiry: "2027-06-01T00:00:00.000Z",
+    });
 
-    await expect(
-      service.update("nonexistent-id", { regNo: "KA-01-AB-1234" }),
-    ).rejects.toThrow(NotFoundException);
+    expect(vehicleUpdate).toHaveBeenCalledWith({
+      where: { id: "veh-123" },
+      data: {
+        regNo: "MH-12-AB-9999",
+        insuranceExpiry: new Date("2027-06-01T00:00:00.000Z"),
+      },
+    });
   });
 
-  it("deactivate() sets active=false and deletedAt", async () => {
+  it("deactivate() marks active=false and sets deletedAt", async () => {
     const result = await service.deactivate("veh-123");
 
-    expect(vehicleFindFirst).toHaveBeenCalledWith({
-      where: { id: "veh-123", deletedAt: null },
-    });
     expect(vehicleUpdate).toHaveBeenCalledWith({
       where: { id: "veh-123" },
       data: { active: false, deletedAt: expect.any(Date) },

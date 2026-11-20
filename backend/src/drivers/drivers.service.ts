@@ -60,6 +60,7 @@ export class DriversService {
       phone: dto.phone.trim(),
       licenseNo: dto.licenseNo?.trim() || null,
       licenseExpiry: dto.licenseExpiry ? new Date(dto.licenseExpiry) : null,
+      verificationStatus: dto.verificationStatus ?? "VERIFIED",
       userId: dto.userId ?? null,
       active: true,
     } as Prisma.DriverUncheckedCreateInput;
@@ -100,6 +101,7 @@ export class DriversService {
     if (dto.licenseExpiry !== undefined) {
       data.licenseExpiry = dto.licenseExpiry ? new Date(dto.licenseExpiry) : null;
     }
+    if (dto.verificationStatus !== undefined) data.verificationStatus = dto.verificationStatus;
     if (dto.userId !== undefined) data.userId = dto.userId ?? null;
     if (dto.dutyStatus !== undefined) data.dutyStatus = dto.dutyStatus;
     if (dto.active !== undefined) data.active = dto.active;

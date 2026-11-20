@@ -20,12 +20,18 @@ import { CompleteStopDto } from "./dto/complete-stop.dto";
 import { RecordCollectionDto } from "./dto/record-collection.dto";
 import { RecordExpenseDto } from "./dto/record-expense.dto";
 import { EodCloseDto } from "./dto/eod-close.dto";
+import { AssignmentGuardService } from "./assignment-guard.service";
+import { TripStatusTransitionDto } from "./dto/trip-status-transition.dto";
+import { canTransition, canDriverTransition } from "./trip-state.machine";
+import { PodControlService } from "../pods/pod-control.service";
 
 @Injectable()
 export class TripsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tripNumber: TripNumberService,
+    private readonly assignmentGuard: AssignmentGuardService,
+    private readonly podControl: PodControlService,
   ) {}
 
   private async loadTripForAction(tx: Prisma.TransactionClient, id: string) {
@@ -170,7 +176,7 @@ export class TripsService {
     return trip;
   }
 
-  async create(dto: CreateTripDto) {
+  async create(dto: CreateTripDto, userId?: string) {
     if (!dto.stops || dto.stops.length === 0) {
       throw new BadRequestException("At least one trip stop is required.");
     }
@@ -178,73 +184,154 @@ export class TripsService {
       throw new BadRequestException("Provide clientId or vendorId, not both.");
     }
 
+    const guardResult = await this.assignmentGuard.validateAssignment({
+      vehicleId: dto.vehicleId,
+      driverId: dto.driverId,
+      overrideReason: dto.assignmentOverrideReason,
+    });
+
     const { organizationId } = requireTenant();
 
     return this.prisma.$transaction(
       async (tx) => {
-      const tripNumber = await this.tripNumber.nextTripNumber(tx, organizationId);
+        const tripNumber = await this.tripNumber.nextTripNumber(tx, organizationId);
 
-      const stopsData = dto.stops.map((s, idx) => ({
-        organizationId,
-        sequence: s.sequence ?? idx + 1,
-        name: s.name.trim(),
-        address: s.address?.trim() || null,
-        expectedQty: s.expectedQty ?? null,
-        collectionType: s.collectionType ?? "COD",
-        expectedCollection: s.expectedCollection ?? 0,
-      }));
-
-      return tx.trip.create({
-        data: {
+        const stopsData = dto.stops.map((s, idx) => ({
           organizationId,
-          tripNumber,
-          clientId: dto.clientId ?? null,
-          vendorId: dto.vendorId ?? null,
-          routeId: dto.routeId ?? null,
-          driverId: dto.driverId ?? null,
-          vehicleId: dto.vehicleId ?? null,
-          origin: dto.origin?.trim() || null,
-          destination: dto.destination?.trim() || null,
-          lrNumber: dto.lrNumber?.trim() || null,
-          eta: dto.eta ? new Date(dto.eta) : null,
-          odometerStart: dto.odometerStart ?? null,
-          status: "ASSIGNED",
-          tripStops: {
-            create: stopsData,
+          sequence: s.sequence ?? idx + 1,
+          name: s.name.trim(),
+          address: s.address?.trim() || null,
+          expectedQty: s.expectedQty ?? null,
+          collectionType: s.collectionType ?? "COD",
+          expectedCollection: s.expectedCollection ?? 0,
+        }));
+
+        const trip = await tx.trip.create({
+          data: {
+            organizationId,
+            tripNumber,
+            clientId: dto.clientId ?? null,
+            vendorId: dto.vendorId ?? null,
+            routeId: dto.routeId ?? null,
+            driverId: dto.driverId ?? null,
+            vehicleId: dto.vehicleId ?? null,
+            origin: dto.origin?.trim() || null,
+            destination: dto.destination?.trim() || null,
+            lrNumber: dto.lrNumber?.trim() || null,
+            eta: dto.eta ? new Date(dto.eta) : null,
+            odometerStart: dto.odometerStart ?? null,
+            status: "ASSIGNED",
+            tripStops: {
+              create: stopsData,
+            },
           },
-        },
-        include: {
-          client: { select: { id: true, name: true } },
-          driver: { select: { id: true, name: true } },
-          vehicle: { select: { id: true, regNo: true } },
-          tripStops: { orderBy: { sequence: "asc" } },
-        },
-      });
-    },
-    { timeout: 20000, maxWait: 10000 },
-  );
+          include: {
+            client: { select: { id: true, name: true } },
+            driver: { select: { id: true, name: true } },
+            vehicle: { select: { id: true, regNo: true } },
+            tripStops: { orderBy: { sequence: "asc" } },
+          },
+        });
+
+        if (dto.vehicleId || dto.driverId) {
+          await tx.tripAssignmentHistory.create({
+            data: {
+              organizationId,
+              tripId: trip.id,
+              newVehicleId: dto.vehicleId ?? null,
+              newDriverId: dto.driverId ?? null,
+              reason: dto.assignmentOverrideReason
+                ? `OVERRIDDEN: ${dto.assignmentOverrideReason}`
+                : "INITIAL_ASSIGNMENT",
+              changedById: userId ?? null,
+            },
+          });
+        }
+
+        if (guardResult.overridden) {
+          await tx.tripException.create({
+            data: {
+              organizationId,
+              tripId: trip.id,
+              type: "ASSIGNMENT_OVERRIDE",
+              reason: dto.assignmentOverrideReason || `Overrode warnings: ${guardResult.warnings.join(", ")}`,
+              actorId: userId ?? null,
+            },
+          });
+        }
+
+        return trip;
+      },
+      { timeout: 20000, maxWait: 10000 },
+    );
   }
 
-  async update(id: string, dto: UpdateTripDto) {
+  async update(id: string, dto: UpdateTripDto, userId?: string) {
     const trip = await this.get(id);
 
-    if (trip.status !== "ASSIGNED") {
-      throw new BadRequestException("Trip can only be edited while in ASSIGNED state.");
+    if (trip.status !== "ASSIGNED" && trip.status !== "PLACED") {
+      throw new BadRequestException("Trip can only be edited while in ASSIGNED or PLACED state.");
     }
 
-    const data: Prisma.TripUncheckedUpdateInput = {};
-    if (dto.driverId !== undefined) data.driverId = dto.driverId;
-    if (dto.vehicleId !== undefined) data.vehicleId = dto.vehicleId;
-    if (dto.routeId !== undefined) data.routeId = dto.routeId;
-    if (dto.origin !== undefined) data.origin = dto.origin?.trim() || null;
-    if (dto.destination !== undefined) data.destination = dto.destination?.trim() || null;
-    if (dto.lrNumber !== undefined) data.lrNumber = dto.lrNumber?.trim() || null;
-    if (dto.eta !== undefined) data.eta = new Date(dto.eta);
+    const { organizationId } = requireTenant();
+    const vehicleChanged = dto.vehicleId !== undefined && dto.vehicleId !== trip.vehicleId;
+    const driverChanged = dto.driverId !== undefined && dto.driverId !== trip.driverId;
 
-    return this.prisma.trip.update({
-      where: { id },
-      data,
-      include: { tripStops: { orderBy: { sequence: "asc" } } },
+    let guardResult = { warnings: [] as string[], overridden: false };
+    if (vehicleChanged || driverChanged) {
+      const targetVehicleId = dto.vehicleId !== undefined ? dto.vehicleId : trip.vehicleId;
+      const targetDriverId = dto.driverId !== undefined ? dto.driverId : trip.driverId;
+      guardResult = await this.assignmentGuard.validateAssignment({
+        vehicleId: targetVehicleId,
+        driverId: targetDriverId,
+        overrideReason: dto.assignmentOverrideReason,
+      });
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const data: Prisma.TripUncheckedUpdateInput = {};
+      if (dto.driverId !== undefined) data.driverId = dto.driverId;
+      if (dto.vehicleId !== undefined) data.vehicleId = dto.vehicleId;
+      if (dto.routeId !== undefined) data.routeId = dto.routeId;
+      if (dto.origin !== undefined) data.origin = dto.origin?.trim() || null;
+      if (dto.destination !== undefined) data.destination = dto.destination?.trim() || null;
+      if (dto.lrNumber !== undefined) data.lrNumber = dto.lrNumber?.trim() || null;
+      if (dto.eta !== undefined) data.eta = new Date(dto.eta);
+
+      const updatedTrip = await tx.trip.update({
+        where: { id },
+        data,
+        include: { tripStops: { orderBy: { sequence: "asc" } } },
+      });
+
+      if (vehicleChanged || driverChanged) {
+        await tx.tripAssignmentHistory.create({
+          data: {
+            organizationId,
+            tripId: id,
+            previousVehicleId: trip.vehicleId,
+            newVehicleId: dto.vehicleId !== undefined ? dto.vehicleId : trip.vehicleId,
+            previousDriverId: trip.driverId,
+            newDriverId: dto.driverId !== undefined ? dto.driverId : trip.driverId,
+            reason: dto.assignmentOverrideReason || "ASSIGNMENT_UPDATE",
+            changedById: userId ?? null,
+          },
+        });
+      }
+
+      if (guardResult.overridden) {
+        await tx.tripException.create({
+          data: {
+            organizationId,
+            tripId: id,
+            type: "ASSIGNMENT_OVERRIDE",
+            reason: dto.assignmentOverrideReason || `Overrode warnings: ${guardResult.warnings.join(", ")}`,
+            actorId: userId ?? null,
+          },
+        });
+      }
+
+      return updatedTrip;
     });
   }
 
@@ -730,5 +817,141 @@ export class TripsService {
     const tally = await this.prisma.eodTally.findFirst({ where: { tripId: id } });
     if (!tally) throw new NotFoundException("EOD has not been closed for this trip.");
     return tally;
+  }
+
+  async listStatusEvents(tripId: string) {
+    await this.get(tripId);
+    return this.prisma.tripStatusEvent.findMany({
+      where: { tripId },
+      orderBy: { occurredAt: "asc" },
+    });
+  }
+
+  async transitionStatus(
+    id: string,
+    dto: TripStatusTransitionDto,
+    user: { sub: string; role: string },
+  ) {
+    const { organizationId } = requireTenant();
+    const trip = await this.prisma.trip.findFirst({
+      where: { id, deletedAt: null },
+      include: { driver: true },
+    });
+    if (!trip) throw new NotFoundException("Trip not found.");
+
+    if (user.role === "DRIVER") {
+      this.assertActorCanActOnTrip(trip, user);
+      if (!canDriverTransition(trip.status, dto.toStatus)) {
+        throw new ForbiddenException(
+          `Drivers are not authorized to transition trip from ${trip.status} to ${dto.toStatus}.`,
+        );
+      }
+    }
+
+    if (!canTransition(trip.status, dto.toStatus)) {
+      throw new BadRequestException(
+        `Invalid trip status transition from ${trip.status} to ${dto.toStatus}.`,
+      );
+    }
+
+    if (dto.toStatus === "VEHICLE_REPLACED") {
+      if (!dto.newVehicleId) {
+        throw new BadRequestException("newVehicleId is required when transitioning to VEHICLE_REPLACED.");
+      }
+      await this.assignmentGuard.validateAssignment({
+        vehicleId: dto.newVehicleId,
+        driverId: dto.newDriverId ?? trip.driverId,
+        overrideReason: dto.assignmentOverrideReason,
+      });
+    }
+
+    const updatedTrip = await this.prisma.$transaction(async (tx) => {
+      const data: Prisma.TripUncheckedUpdateInput = {
+        status: dto.toStatus as any,
+        version: { increment: 1 },
+      };
+
+      if (dto.toStatus === "DELIVERED") {
+        data.deliveredAt = new Date();
+      } else if (dto.toStatus === "CLOSED") {
+        data.closedAt = new Date();
+      } else if (dto.toStatus === "IN_PROGRESS" || dto.toStatus === "LOADING") {
+        if (!trip.startedAt) data.startedAt = new Date();
+      }
+
+      if (dto.toStatus === "VEHICLE_REPLACED") {
+        data.vehicleId = dto.newVehicleId;
+        if (dto.newDriverId) data.driverId = dto.newDriverId;
+
+        await tx.tripAssignmentHistory.create({
+          data: {
+            organizationId,
+            tripId: id,
+            previousVehicleId: trip.vehicleId,
+            newVehicleId: dto.newVehicleId,
+            previousDriverId: trip.driverId,
+            newDriverId: dto.newDriverId ?? trip.driverId,
+            reason: dto.reason || "VEHICLE_REPLACEMENT",
+            reminderPartB: true,
+            changedById: user.sub,
+          },
+        });
+
+        await tx.tripException.create({
+          data: {
+            organizationId,
+            tripId: id,
+            type: "VEHICLE_REPLACED",
+            reason: dto.reason || "Vehicle breakdown / replacement in transit",
+            actorId: user.sub,
+          },
+        });
+      } else if (dto.toStatus === trip.status) {
+        await tx.tripException.create({
+          data: {
+            organizationId,
+            tripId: id,
+            type: "STATUS_EXCEPTION",
+            reason: dto.reason || `Exception recorded while in status ${trip.status}`,
+            actorId: user.sub,
+          },
+        });
+      }
+
+      await tx.tripStatusEvent.create({
+        data: {
+          organizationId,
+          tripId: id,
+          fromStatus: trip.status,
+          toStatus: dto.toStatus,
+          actorId: user.sub,
+          reason: dto.reason?.trim() || null,
+        },
+      });
+
+      return tx.trip.update({
+        where: { id },
+        data,
+        include: {
+          client: { select: { id: true, name: true } },
+          driver: { select: { id: true, name: true } },
+          vehicle: { select: { id: true, regNo: true } },
+          tripStops: { orderBy: { sequence: "asc" } },
+        },
+      });
+    });
+
+    // Auto-create POD after the transaction commits (idempotent, outside tx to avoid nesting)
+    if (dto.toStatus === "DELIVERED") {
+      await this.maybeCreatePodAfterDelivery(id, organizationId, user.sub);
+    }
+
+    return updatedTrip;
+  }
+
+  // Auto-create Pod outside the transaction (idempotent; avoids nested tx issues)
+  // Called AFTER the main transaction commits
+  private async maybeCreatePodAfterDelivery(tripId: string, organizationId: string, actorId: string) {
+    await this.podControl.ensurePodForTrip(tripId, organizationId, actorId);
   }
 }

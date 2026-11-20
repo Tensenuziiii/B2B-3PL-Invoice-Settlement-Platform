@@ -28,6 +28,7 @@ import { CompleteStopDto } from "./dto/complete-stop.dto";
 import { RecordCollectionDto } from "./dto/record-collection.dto";
 import { RecordExpenseDto } from "./dto/record-expense.dto";
 import { EodCloseDto } from "./dto/eod-close.dto";
+import { TripStatusTransitionDto } from "./dto/trip-status-transition.dto";
 import { TripsService } from "./trips.service";
 
 @ApiTags("trips")
@@ -38,7 +39,7 @@ export class TripsController {
   constructor(private readonly tripsService: TripsService) {}
 
   @Get()
-  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.AUDITOR, Role.ACCOUNTS)
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.AUDITOR, Role.ACCOUNTS, Role.STAFF, Role.VIEWER)
   @ApiOperation({ summary: "List trips" })
   list(@Query() query: ListTripsQueryDto) {
     return this.tripsService.list(query);
@@ -94,24 +95,24 @@ export class TripsController {
   }
 
   @Get(":id")
-  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.AUDITOR, Role.ACCOUNTS, Role.DRIVER)
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.AUDITOR, Role.ACCOUNTS, Role.DRIVER, Role.STAFF, Role.VIEWER)
   @ApiOperation({ summary: "Get a trip with stops" })
   get(@Param("id") id: string) {
     return this.tripsService.get(id);
   }
 
   @Post()
-  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER)
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.STAFF)
   @ApiOperation({ summary: "Create a trip with stops" })
-  create(@Body() dto: CreateTripDto) {
-    return this.tripsService.create(dto);
+  create(@Body() dto: CreateTripDto, @Req() req: any) {
+    return this.tripsService.create(dto, req?.user?.sub);
   }
 
   @Patch(":id")
-  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER)
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.STAFF)
   @ApiOperation({ summary: "Update a trip (only in ASSIGNED state)" })
-  update(@Param("id") id: string, @Body() dto: UpdateTripDto) {
-    return this.tripsService.update(id, dto);
+  update(@Param("id") id: string, @Body() dto: UpdateTripDto, @Req() req: any) {
+    return this.tripsService.update(id, dto, req?.user?.sub);
   }
 
   @Delete(":id")
@@ -189,5 +190,24 @@ export class TripsController {
   @ApiOperation({ summary: "Get EOD tally for a trip" })
   getEod(@Param("id") id: string) {
     return this.tripsService.getEod(id);
+  }
+
+  @Post(":id/status-transitions")
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.STAFF, Role.DRIVER)
+  @ApiOperation({ summary: "Transition trip status (R1 canonical lifecycle)" })
+  transitionStatus(
+    @Param("id") id: string,
+    @Body() dto: TripStatusTransitionDto,
+    @Req() req: any,
+  ) {
+    return this.tripsService.transitionStatus(id, dto, req.user);
+  }
+
+  @Get(":id/status-events")
+  @Roles(Role.ADMIN, Role.DISPATCH_MANAGER, Role.ACCOUNTS, Role.STAFF, Role.VIEWER)
+  @ApiOperation({ summary: "List all trip status history events" })
+  listStatusEvents(@Param("id") id: string) {
+    return this.tripsService.listStatusEvents(id);
   }
 }

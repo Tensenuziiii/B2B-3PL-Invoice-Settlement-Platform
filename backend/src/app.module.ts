@@ -11,6 +11,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { VendorsModule } from './vendors/vendors.module';
+import { OwnersModule } from './owners/owners.module';
 import { RoutesModule } from './routes/routes.module';
 import { RateCardsModule } from './rate-cards/rate-cards.module';
 import { StorageModule } from './storage/storage.module';
@@ -21,6 +22,7 @@ import { InvoicesModule } from './invoices/invoices.module';
 import { DisputesModule } from './disputes/disputes.module';
 import { PaymentsModule } from './payments/payments.module';
 import { VendorSettlementsModule } from './vendor-settlements/vendor-settlements.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { TenantInterceptor } from './core/tenant/tenant.interceptor';
@@ -49,6 +51,7 @@ import { TenantInterceptor } from './core/tenant/tenant.interceptor';
     UsersModule,
     VehiclesModule,
     VendorsModule,
+    OwnersModule,
     RoutesModule,
     RateCardsModule,
     StorageModule,
@@ -59,6 +62,7 @@ import { TenantInterceptor } from './core/tenant/tenant.interceptor';
     DisputesModule,
     PaymentsModule,
     VendorSettlementsModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [

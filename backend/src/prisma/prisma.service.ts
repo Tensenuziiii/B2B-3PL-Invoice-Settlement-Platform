@@ -33,11 +33,24 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get auditLog()          { return this.c.auditLog; }
   get notification()      { return this.c.notification; }
   get client()            { return this.c.client; }
+  get customerContact()   { return this.c.customerContact; }
+  get approvalStageTemplate() { return this.c.approvalStageTemplate; }
+  get customerDocumentRule()  { return this.c.customerDocumentRule; }
+  get owner()             { return this.c.owner; }
+  get vendor()            { return this.c.vendor; }
+  get route()             { return this.c.route; }
+  get rateCard()          { return this.c.rateCard; }
+  get rateCardItem()      { return this.c.rateCardItem; }
   get vehicle()           { return this.c.vehicle; }
   get driver()            { return this.c.driver; }
   get trip()              { return this.c.trip; }
   get tripStop()          { return this.c.tripStop; }
-  get pod()               { return (this.c as any).pod; }
+  get tripStatusEvent()   { return this.c.tripStatusEvent; }
+  get tripException()     { return this.c.tripException; }
+  get tripAssignmentHistory() { return this.c.tripAssignmentHistory; }
+  get pod()               { return this.c.pod; }
+  get podCheckItem()      { return this.c.podCheckItem; }
+  get podEvent()          { return this.c.podEvent; }
   get podDocument()       { return this.c.podDocument; }
   get collection()        { return this.c.collection; }
   get tripExpense()       { return this.c.tripExpense; }
@@ -45,6 +58,8 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get auditReview()       { return this.c.auditReview; }
   get invoice()           { return this.c.invoice; }
   get invoiceLine()       { return this.c.invoiceLine; }
+  get invoiceStage()      { return this.c.invoiceStage; }
+  get invoiceFollowUp()   { return this.c.invoiceFollowUp; }
   get payment()           { return this.c.payment; }
   get vendorSettlement()      { return this.c.vendorSettlement; }
   get vendorSettlementItem()  { return this.c.vendorSettlementItem; }
@@ -52,6 +67,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get message()           { return this.c.message; }
   get idempotencyKey()    { return this.c.idempotencyKey; }
   get systemAlert()       { return (this.c as any).systemAlert; }
+  get auditEvent()        { return this.c.auditEvent; }
 
   get $queryRaw()      { return this.c.$queryRaw.bind(this.c); }
   get $queryRawUnsafe(){ return this.c.$queryRawUnsafe.bind(this.c); }

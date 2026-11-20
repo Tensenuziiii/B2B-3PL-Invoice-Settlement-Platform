@@ -37,6 +37,7 @@ export type {
   UserStatus,
   TripStatus,
   TripStopStatus,
+  PodStatus,
   InvoiceStatus,
   CollectionMode,
   ExpenseType,
@@ -52,6 +53,10 @@ export type {
   Trip,
   TripStop,
   Client,
+  CustomerContact,
+  ApprovalStageTemplate,
+  CustomerDocumentRule,
+  Owner,
   Vendor,
   Vehicle,
   Driver,
@@ -72,6 +77,11 @@ export type {
   EodTally,
   AuditReview,
   Notification,
+  Pod,
+  PodCheckItem,
+  PodEvent,
+  InvoiceStage,
+  InvoiceFollowUp,
 } from "./entities";
 
 // Error envelope

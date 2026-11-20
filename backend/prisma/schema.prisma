@@ -13,6 +13,8 @@ datasource db {
 
 enum Role {
   ADMIN
+  STAFF
+  VIEWER
   DISPATCH_MANAGER
   DRIVER
   AUDITOR
@@ -27,16 +29,40 @@ enum UserStatus {
   LOCKED
 }
 
-// Spec §16
+// Spec §16 & R1 Lifecycle
 enum TripStatus {
+  // R1 Lifecycle
+  PLACED
+  LOADING
+  LOADED
+  IN_TRANSIT
+  UNLOADING
+  DELIVERED
+  CLOSED
+  CANCELLED
+  VEHICLE_REPLACED
+
+  // P3 / Operational Sub-states
   ASSIGNED
   IN_PROGRESS
   DELIVERY_IN_PROGRESS
-  DELIVERED
   AUDIT_PENDING
   CORRECTION_REQUESTED
   AUDITED
   READY_FOR_BILLING
+}
+
+enum PodStatus {
+  PENDING_DELIVERY
+  SOFT_COPY_RECEIVED
+  SOFT_COPY_CHECKED
+  ORIGINAL_DISPATCHED
+  ORIGINAL_RECEIVED
+  SUBMITTED_TO_CLIENT
+  ON_HOLD
+  LOST
+  DUPLICATE_REQUESTED
+  ACKNOWLEDGED
 }
 
 enum TripStopStatus {
@@ -53,17 +79,22 @@ enum PodDocumentType {
   OTHER
 }
 
-// Spec §29
+// Spec §29 & R1 Approval Lifecycle
 enum InvoiceStatus {
   DRAFT
   SUBMITTED
-  CLIENT_REVIEW
+  IN_STAGE
+  APPROVED_STAGE
   APPROVED
-  PAYMENT_QUEUED
+  ON_HOLD
+  FULLY_APPROVED
+  PARTIALLY_PAID
   PAID
-  REJECTED
-  DISPUTED
   CANCELLED
+  REJECTED
+  CLIENT_REVIEW
+  PAYMENT_QUEUED
+  DISPUTED
   OVERDUE
 }
 
@@ -156,11 +187,21 @@ model Organization {
   drivers           Driver[]
   clients           Client[]
   vendors           Vendor[]
+  owners            Owner[]
+  customerContacts  CustomerContact[]
+  approvalStageTemplates ApprovalStageTemplate[]
+  customerDocumentRules  CustomerDocumentRule[]
   routes            Route[]
   rateCards         RateCard[]
   rateCardItems     RateCardItem[]
   trips             Trip[]
   tripStops         TripStop[]
+  tripStatusEvents  TripStatusEvent[]
+  tripExceptions    TripException[]
+  tripAssignmentHistories TripAssignmentHistory[]
+  pods              Pod[]
+  podCheckItems     PodCheckItem[]
+  podEvents         PodEvent[]
   podDocuments      PodDocument[]
   collections       Collection[]
   tripExpenses      TripExpense[]
@@ -168,12 +209,15 @@ model Organization {
   auditReviews      AuditReview[]
   invoices          Invoice[]
   invoiceLines      InvoiceLine[]
+  invoiceStages     InvoiceStage[]
+  invoiceFollowUps  InvoiceFollowUp[]
   payments          Payment[]
   disputes          Dispute[]
   messages          Message[]
   notifications     Notification[]
   vendorSettlements     VendorSettlement[]
   vendorSettlementItems VendorSettlementItem[]
+  auditEvents       AuditEvent[]
 
   @@index([status])
 }
@@ -304,19 +348,98 @@ model Client {
   gstin            String?
   stateCode        String?
   paymentTermsDays Int      @default(30)
+  creditDays       Int      @default(30)
+  digitalPodEnabled Boolean @default(false)
   status           String   @default("ACTIVE")
   createdAt        DateTime @default(now()) @db.Timestamptz(6)
   updatedAt        DateTime @updatedAt @db.Timestamptz(6)
   deletedAt        DateTime? @db.Timestamptz(6)
 
-  users    User[]
-  trips    Trip[]
-  invoices Invoice[]
-  rateCards RateCard[]
+  users            User[]
+  trips            Trip[]
+  invoices         Invoice[]
+  rateCards        RateCard[]
+  contacts         CustomerContact[]
+  approvalTemplates ApprovalStageTemplate[]
+  documentRules    CustomerDocumentRule[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
   @@index([organizationId, status])
+}
+
+model CustomerContact {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  clientId       String       @db.Uuid
+  client         Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name           String
+  role           String?      // e.g. "ACCOUNTS_PAYABLE", "LOGISTICS_HEAD", "WAREHOUSE_MANAGER"
+  phone          String?
+  email          String?
+  isPrimary      Boolean      @default(false)
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([clientId])
+}
+
+model ApprovalStageTemplate {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  clientId       String       @db.Uuid
+  client         Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  sequence       Int
+  name           String       // e.g. "POD Check", "Plant Clearance", "Finance Authorization"
+  slaHours       Int          @default(48)
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(6)
+
+  @@unique([clientId, sequence])
+  @@index([organizationId])
+  @@index([clientId])
+}
+
+model CustomerDocumentRule {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  clientId       String       @db.Uuid
+  client         Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  documentType   String       // e.g. "ORIGINAL_LR", "WEIGHMENT_SLIP", "INVOICE_COPY", "GATE_PASS"
+  isMandatory    Boolean      @default(true)
+  notes          String?
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(6)
+
+  @@unique([clientId, documentType])
+  @@index([organizationId])
+  @@index([clientId])
+}
+
+model Owner {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  name           String
+  partyType      String       @default("INDIVIDUAL") // "INDIVIDUAL" | "FLEET_OPERATOR" | "TRANSPORTER"
+  pan            String?
+  phone          String?
+  address        String?
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(6)
+  deletedAt      DateTime?    @db.Timestamptz(6)
+
+  trucks         Vehicle[]
+  trips          Trip[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([organizationId, pan])
 }
 
 model Vehicle {
@@ -327,12 +450,19 @@ model Vehicle {
   type            String?
   capacityKg      Int?
   currentOdometer Int
+  ownerId         String?   @db.Uuid
+  owner           Owner?    @relation(fields: [ownerId], references: [id])
+  insuranceExpiry DateTime? @db.Timestamptz(6)
+  fitnessExpiry   DateTime? @db.Timestamptz(6)
+  pucExpiry       DateTime? @db.Timestamptz(6)
   active          Boolean   @default(true)
   createdAt       DateTime  @default(now()) @db.Timestamptz(6)
   updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
   deletedAt       DateTime? @db.Timestamptz(6)
 
   trips Trip[]
+  assignmentHistoryAsPrev TripAssignmentHistory[] @relation("PrevVehicle")
+  assignmentHistoryAsNew  TripAssignmentHistory[] @relation("NewVehicle")
 
   @@unique([organizationId, regNo])
   @@index([organizationId])
@@ -347,6 +477,7 @@ model Driver {
   phone           String
   licenseNo       String?
   licenseExpiry   DateTime? @db.Timestamptz(6)
+  verificationStatus String? @default("VERIFIED")
   userId          String?   @unique @db.Uuid
   dutyStatus      String?   @default("OFFLINE")
   active          Boolean   @default(true)
@@ -355,6 +486,8 @@ model Driver {
   deletedAt       DateTime? @db.Timestamptz(6)
 
   trips Trip[]
+  assignmentHistoryAsPrev TripAssignmentHistory[] @relation("PrevDriver")
+  assignmentHistoryAsNew  TripAssignmentHistory[] @relation("NewDriver")
 
   @@index([organizationId])
   @@index([organizationId, active])
@@ -378,6 +511,8 @@ model Trip {
   client            Client?    @relation(fields: [clientId], references: [id])
   vendorId          String?    @db.Uuid
   vendor            Vendor?    @relation(fields: [vendorId], references: [id])
+  ownerId           String?    @db.Uuid
+  owner             Owner?     @relation(fields: [ownerId], references: [id])
   routeId           String?    @db.Uuid
   route             Route?     @relation(fields: [routeId], references: [id])
   driverId          String?    @db.Uuid
@@ -402,17 +537,136 @@ model Trip {
   updatedAt         DateTime   @updatedAt @db.Timestamptz(6)
   deletedAt         DateTime?  @db.Timestamptz(6)
 
-  tripStops    TripStop[]
-  tripExpenses TripExpense[]
-  eodTally     EodTally?
-  auditReviews AuditReview[]
-  invoiceLine  InvoiceLine?
-  vendorSettlementItem VendorSettlementItem?
+  tripStops              TripStop[]
+  tripExpenses           TripExpense[]
+  eodTally               EodTally?
+  auditReviews           AuditReview[]
+  invoiceLine            InvoiceLine?
+  vendorSettlementItem   VendorSettlementItem?
+  exceptions             TripException[]
+  statusEvents           TripStatusEvent[]
+  assignmentHistory      TripAssignmentHistory[]
+  pod                    Pod?
 
   @@unique([organizationId, tripNumber])
   @@index([organizationId])
   @@index([status])
   @@index([organizationId, driverId, status])
+}
+
+model TripStatusEvent {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  tripId         String       @db.Uuid
+  trip           Trip         @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  fromStatus     String
+  toStatus       String
+  actorId        String?      @db.Uuid
+  reason         String?
+  occurredAt     DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([tripId, occurredAt])
+}
+
+model TripException {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  tripId         String       @db.Uuid
+  trip           Trip         @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type           String       // "DELAY" | "BREAKDOWN" | "ACCIDENT" | "ROUTE_DEVIATION" | "ASSIGNMENT_OVERRIDE"
+  reason         String
+  actorId        String?      @db.Uuid
+  occurredAt     DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([tripId])
+}
+
+model TripAssignmentHistory {
+  id                String       @id @default(uuid()) @db.Uuid
+  organizationId    String       @db.Uuid
+  organization      Organization @relation(fields: [organizationId], references: [id])
+  tripId            String       @db.Uuid
+  trip              Trip         @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  previousVehicleId String?      @db.Uuid
+  previousVehicle   Vehicle?     @relation("PrevVehicle", fields: [previousVehicleId], references: [id])
+  newVehicleId      String?      @db.Uuid
+  newVehicle        Vehicle?     @relation("NewVehicle", fields: [newVehicleId], references: [id])
+  previousDriverId  String?      @db.Uuid
+  previousDriver    Driver?      @relation("PrevDriver", fields: [previousDriverId], references: [id])
+  newDriverId       String?      @db.Uuid
+  newDriver         Driver?      @relation("NewDriver", fields: [newDriverId], references: [id])
+  reason            String?
+  reminderPartB     Boolean      @default(false)
+  changedById       String?      @db.Uuid
+  occurredAt        DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([tripId])
+}
+
+model Pod {
+  id                  String       @id @default(uuid()) @db.Uuid
+  organizationId      String       @db.Uuid
+  organization        Organization @relation(fields: [organizationId], references: [id])
+  tripId              String       @unique @db.Uuid
+  trip                Trip         @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  currentStatus       PodStatus    @default(PENDING_DELIVERY)
+  deliveredAt         DateTime?    @db.Timestamptz(6)
+  originalReceivedAt  DateTime?    @db.Timestamptz(6)
+  holdReason          String?
+  holdRemarks         String?
+  courierName         String?
+  courierTrackingNo   String?
+  courierDispatchedAt DateTime?    @db.Timestamptz(6)
+  submittedToClientAt DateTime?    @db.Timestamptz(6)
+  invoiceId           String?      @unique @db.Uuid
+  invoice             Invoice?     @relation("InvoicePod", fields: [invoiceId], references: [id])
+  createdAt           DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime     @updatedAt @db.Timestamptz(6)
+
+  checkItems          PodCheckItem[]
+  events              PodEvent[]
+
+  @@index([organizationId])
+  @@index([currentStatus])
+}
+
+model PodCheckItem {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  podId          String       @db.Uuid
+  pod            Pod          @relation(fields: [podId], references: [id], onDelete: Cascade)
+  itemCode       String       // "STAMP_LEGIBLE" | "SIGNATURE_VALID" | "DATE_RECORDED" | "QTY_MATCH"
+  result         String       // "PASS" | "FAIL" | "WAIVED"
+  notes          String?
+  checkedById    String?      @db.Uuid
+  checkedAt      DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@unique([podId, itemCode])
+  @@index([organizationId])
+  @@index([podId])
+}
+
+model PodEvent {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  podId          String       @db.Uuid
+  pod            Pod          @relation(fields: [podId], references: [id], onDelete: Cascade)
+  fromStatus     String?
+  toStatus       String
+  actorId        String?      @db.Uuid
+  reason         String?
+  remarks        String?
+  occurredAt     DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([podId, occurredAt])
 }
 
 model TripStop {
@@ -547,13 +801,56 @@ model Invoice {
   cancelledAt    DateTime?     @db.Timestamptz(6)
   deletedAt      DateTime?     @db.Timestamptz(6)
 
-  lines    InvoiceLine[]
-  payments Payment[]
+  lines          InvoiceLine[]
+  payments       Payment[]
+  podId          String?       @unique @db.Uuid
+  pod            Pod?          @relation("InvoicePod")
+  stages         InvoiceStage[]
+  followUps      InvoiceFollowUp[]
 
   @@unique([organizationId, invoiceNumber])
   @@index([organizationId])
   @@index([status, dueDate])
   @@index([clientId])
+}
+
+model InvoiceStage {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  invoiceId      String       @db.Uuid
+  invoice        Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  sequence       Int
+  name           String
+  status         String       @default("PENDING") // "PENDING" | "ACTIVE" | "APPROVED" | "ON_HOLD"
+  approvedById   String?      @db.Uuid
+  approvedAt     DateTime?    @db.Timestamptz(6)
+  remarks        String?
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(6)
+
+  @@unique([invoiceId, sequence])
+  @@index([organizationId])
+  @@index([invoiceId])
+}
+
+model InvoiceFollowUp {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  invoiceId      String       @db.Uuid
+  invoice        Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  contactedOn    DateTime     @default(now()) @db.Timestamptz(6)
+  contactPerson  String?
+  outcome        String       // "PROMISE_TO_PAY" | "UNDER_REVIEW" | "CORRECTION_NEEDED" | "CALL_BACK"
+  remarks        String?
+  nextFollowUpOn DateTime?    @db.Timestamptz(6)
+  loggedById     String?      @db.Uuid
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([invoiceId])
+  @@index([nextFollowUpOn])
 }
 
 model InvoiceLine {
@@ -869,4 +1166,26 @@ model RolePermission {
   @@id([role, permissionId])
   @@index([role])
 }
+
+// ============================================================
+// AUDIT EVENT (R1 Append-Only Traceability)
+// ============================================================
+
+model AuditEvent {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  userId         String?      @db.Uuid
+  entityType     String       // "TRIP" | "POD" | "INVOICE" | "CUSTOMER" | "ASSET"
+  entityId       String       @db.Uuid
+  action         String       // "CREATE" | "STATUS_CHANGE" | "EXCEPTION" | "HOLD" | "PAYMENT"
+  oldValue       Json?
+  newValue       Json?
+  occurredAt     DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@index([entityType, entityId])
+  @@index([userId])
+}
+
 

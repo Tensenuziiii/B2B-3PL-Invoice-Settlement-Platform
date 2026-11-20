@@ -26,6 +26,13 @@ import {
   AlertTriangle,
   RefreshCw,
   Eye,
+  PackageCheck,
+  Send,
+  Clock,
+  Inbox,
+  FileWarning,
+  HelpCircle,
+  History,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -59,6 +66,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { apiClient, ApiError } from "@/lib/api/client";
+import type { Pod, PodCheckItem, PodEvent } from "@/lib/api/types";
 import { getDisplayName, formatRupees, formatNumber, formatDate, logoutUser } from "@/lib/api/utils";
 
 interface AuditSettings {
@@ -157,6 +165,46 @@ export default function InternalAuditWorkspace() {
   );
   const [isDisputeModalOpen, setIsDisputeModalOpen] = useState(false);
 
+  // POD Control & Verification State (R1-TASK-5.1 & R1-TASK-5.2)
+  const [podDetail, setPodDetail] = useState<Pod | null>(null);
+  const [podDocUrl, setPodDocUrl] = useState<string | null>(null);
+  const [fivePointChecklist, setFivePointChecklist] = useState<Array<{ checkType: string; label: string; passed: boolean; remarks: string }>>([
+    { checkType: "STAMP", label: "Consignee Stamp Verified", passed: true, remarks: "" },
+    { checkType: "SIGNATURE", label: "Receiver Signature Verified", passed: true, remarks: "" },
+    { checkType: "DATE", label: "Delivery Date & Time Recorded", passed: true, remarks: "" },
+    { checkType: "REMARKS", label: "Receiver Remarks / Shortage Noted", passed: true, remarks: "" },
+    { checkType: "DAMAGE", label: "Packaging Condition & Seal Verified", passed: true, remarks: "" },
+  ]);
+
+  // Hold Modal State
+  const [isHoldModalOpen, setIsHoldModalOpen] = useState(false);
+  const [holdReason, setHoldReason] = useState("MISSING_STAMP");
+  const [holdRemarks, setHoldRemarks] = useState("");
+
+  // Release Hold Modal State
+  const [isReleaseHoldModalOpen, setIsReleaseHoldModalOpen] = useState(false);
+  const [releaseRemarks, setReleaseRemarks] = useState("");
+
+  // Courier Modal State
+  const [isCourierModalOpen, setIsCourierModalOpen] = useState(false);
+  const [courierName, setCourierName] = useState("");
+  const [courierTrackingNo, setCourierTrackingNo] = useState("");
+  const [courierDispatchedAt, setCourierDispatchedAt] = useState("");
+
+  // Mark Lost Modal State
+  const [isLostModalOpen, setIsLostModalOpen] = useState(false);
+  const [lostDate, setLostDate] = useState("");
+  const [reportedBy, setReportedBy] = useState("");
+  const [incidentSummary, setIncidentSummary] = useState("");
+
+  // Request Duplicate Modal State
+  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
+  const [requestReason, setRequestReason] = useState("Original POD destroyed in courier transit");
+  const [duplicateRemarks, setDuplicateRemarks] = useState("");
+
+  // Events Trail Modal State
+  const [isEventsModalOpen, setIsEventsModalOpen] = useState(false);
+
   // Initial Fetch of Queue
   useEffect(() => {
     let cancelled = false;
@@ -180,20 +228,58 @@ export default function InternalAuditWorkspace() {
     };
   }, []);
 
-  // Fetch Trip Detail when selectedTripId changes
+  // Fetch Trip Detail & POD record when selectedTripId changes
   useEffect(() => {
     if (!selectedTripId) return;
     let cancelled = false;
     setTripDetailLoading(true);
+    setPodDocUrl(null);
+    setPodDetail(null);
     (async () => {
       try {
-        const res = await apiClient.get(`/trips/${selectedTripId}`);
+        const [tripRes, podRes] = await Promise.allSettled([
+          apiClient.get(`/trips/${selectedTripId}`),
+          apiClient.get<Pod>(`/pods/by-trip/${selectedTripId}`),
+        ]);
         if (!cancelled) {
-          const data =
-            res && typeof res === "object" && "data" in res && (res as { data: unknown }).data && typeof (res as { data: unknown }).data === "object"
-              ? ((res as { data: Record<string, unknown> }).data as Record<string, unknown>)
-              : (res as Record<string, unknown>);
-          setTripDetail(data);
+          if (tripRes.status === "fulfilled") {
+            const raw = tripRes.value;
+            const data =
+              raw && typeof raw === "object" && "data" in raw && (raw as { data: unknown }).data && typeof (raw as { data: unknown }).data === "object"
+                ? ((raw as { data: Record<string, unknown> }).data as Record<string, unknown>)
+                : (raw as Record<string, unknown>);
+            setTripDetail(data);
+
+            const stops = (data.stops as Array<{ id: string }>) || [];
+            if (stops.length > 0) {
+              try {
+                const docs = await apiClient.get<Array<{ id: string; url?: string }>>(`/pods/stops/${stops[0].id}`);
+                if (Array.isArray(docs) && docs.length > 0 && !cancelled) {
+                  try {
+                    const dlRes = await apiClient.get<{ url: string }>(`/pods/${docs[0].id}/download-url`);
+                    if (dlRes?.url && !cancelled) {
+                      setPodDocUrl(dlRes.url);
+                    }
+                  } catch {
+                    if (docs[0].url) setPodDocUrl(docs[0].url);
+                  }
+                }
+              } catch {}
+            }
+          }
+          if (podRes.status === "fulfilled" && podRes.value) {
+            setPodDetail(podRes.value);
+            if (Array.isArray(podRes.value.checkItems) && podRes.value.checkItems.length > 0) {
+              setFivePointChecklist((prev) =>
+                prev.map((item) => {
+                  const existing = podRes.value?.checkItems?.find((c) => c.checkType === item.checkType);
+                  return existing
+                    ? { ...item, passed: existing.passed, remarks: existing.remarks || "" }
+                    : item;
+                })
+              );
+            }
+          }
         }
       } catch (err) {
         if (!cancelled) setError(err instanceof ApiError ? err.message : "Failed to load trip");
@@ -233,6 +319,10 @@ export default function InternalAuditWorkspace() {
   // Actions
   const handleVerifyAndApprove = async () => {
     if (!selectedTripId) return;
+    if (podDetail && podDetail.currentStatus === "ON_HOLD") {
+      setError(`Cannot verify trip for billing: POD is currently ON_HOLD (${podDetail.holdReason}). Release hold first.`);
+      return;
+    }
     if (auditNotes.trim().length < 3) {
       setNotesError("Please enter at least 3 characters of audit notes.");
       return;
@@ -253,6 +343,178 @@ export default function InternalAuditWorkspace() {
       await refetchQueueAndSelectNext(selectedTripId);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to verify trip");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // POD Control Actions (R1-TASK-5.1 & R1-TASK-5.2)
+  const handleSubmit5PointChecklist = async () => {
+    if (!podDetail) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      const updatedPod = await apiClient.post<Pod>(`/pods/control/${podDetail.id}/checklist`, {
+        items: fivePointChecklist.map((c) => ({
+          checkType: c.checkType,
+          passed: c.passed,
+          remarks: c.remarks || undefined,
+        })),
+      });
+      setPodDetail(updatedPod);
+      setActionNotice(
+        updatedPod.currentStatus === "SOFT_COPY_CHECKED"
+          ? "5-Point POD checklist approved! Status advanced to SOFT_COPY_CHECKED."
+          : `POD placed on hold due to failed checklist items. Status: ${updatedPod.currentStatus}`
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to submit checklist");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handlePlaceOnHold = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!podDetail) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      const updatedPod = await apiClient.post<Pod>(`/pods/control/${podDetail.id}/hold`, {
+        holdReason,
+        holdRemarks: holdRemarks.trim() || undefined,
+      });
+      setPodDetail(updatedPod);
+      setIsHoldModalOpen(false);
+      setActionNotice(`POD placed on hold (${holdReason}). Billing is blocked.`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to place POD on hold");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleReleaseHold = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!podDetail) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      const updatedPod = await apiClient.post<Pod>(`/pods/control/${podDetail.id}/release-hold`, {
+        releaseRemarks: releaseRemarks.trim() || "Hold released by auditor",
+      });
+      setPodDetail(updatedPod);
+      setIsReleaseHoldModalOpen(false);
+      setActionNotice("POD hold released. Restored to SOFT_COPY_RECEIVED.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to release POD hold");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDispatchCourier = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!podDetail) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      const updatedPod = await apiClient.post<Pod>(`/pods/control/${podDetail.id}/dispatch-courier`, {
+        courierName: courierName.trim(),
+        courierTrackingNo: courierTrackingNo.trim(),
+        courierDispatchedAt: courierDispatchedAt || new Date().toISOString(),
+      });
+      setPodDetail(updatedPod);
+      setIsCourierModalOpen(false);
+      setActionNotice(`Original POD dispatched via ${courierName} (AWB: ${courierTrackingNo}).`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to dispatch courier");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleMarkReceived = async () => {
+    if (!podDetail) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      const updatedPod = await apiClient.post<Pod>(`/pods/control/${podDetail.id}/mark-received`, {});
+      setPodDetail(updatedPod);
+      setActionNotice("Original physical POD confirmed received in central office!");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to confirm POD receipt");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleMarkLost = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!podDetail) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      const updatedPod = await apiClient.post<Pod>(`/pods/control/${podDetail.id}/mark-lost`, {
+        lostDate: lostDate || new Date().toISOString(),
+        reportedBy: reportedBy.trim() || "Auditor",
+        incidentSummary: incidentSummary.trim(),
+      });
+      setPodDetail(updatedPod);
+      setIsLostModalOpen(false);
+      setActionNotice("Original POD marked as LOST. Incident reported.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to mark POD as lost");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRequestDuplicate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!podDetail) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      const updatedPod = await apiClient.post<Pod>(`/pods/control/${podDetail.id}/request-duplicate`, {
+        requestReason: requestReason.trim(),
+        remarks: duplicateRemarks.trim() || undefined,
+      });
+      setPodDetail(updatedPod);
+      setIsDuplicateModalOpen(false);
+      setActionNotice("Duplicate POD request submitted to customer.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to request duplicate POD");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSubmitToClient = async () => {
+    if (!podDetail) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      const updatedPod = await apiClient.post<Pod>(`/pods/control/${podDetail.id}/submit-to-client`, {});
+      setPodDetail(updatedPod);
+      setActionNotice("Original POD officially submitted to client.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to submit POD to client");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleAcknowledge = async () => {
+    if (!podDetail) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      const updatedPod = await apiClient.post<Pod>(`/pods/control/${podDetail.id}/acknowledge`, {});
+      setPodDetail(updatedPod);
+      setActionNotice("Client delivery acknowledged for physical POD.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to record client acknowledgment");
     } finally {
       setActionLoading(false);
     }
@@ -1019,6 +1281,20 @@ export default function InternalAuditWorkspace() {
                     <p className="text-sm font-bold text-slate-800">No trips pending audit.</p>
                     <p className="text-xs text-slate-500 mt-1">There are no operational deliveries awaiting verification.</p>
                   </div>
+                ) : podDocUrl ? (
+                  <div
+                    style={{
+                      transform: `scale(${zoomLevel}) rotate(${rotation}deg)`,
+                      transition: "transform 0.15s ease-out",
+                      transformOrigin: "center center",
+                    }}
+                    className="max-w-[480px] bg-white rounded-md shadow-md border border-slate-300 p-2 overflow-hidden flex flex-col items-center justify-center"
+                  >
+                    <img src={podDocUrl} alt="Soft Copy POD Document" className="max-w-full max-h-[580px] object-contain rounded" />
+                    <div className="mt-2 text-center text-[10px] font-mono text-slate-500">
+                      Uploaded Soft Copy POD • {tripNumberDisplay}
+                    </div>
+                  </div>
                 ) : (
                   <div
                     style={{
@@ -1399,6 +1675,221 @@ export default function InternalAuditWorkspace() {
                   </CardContent>
                 </Card>
 
+                {/* R1 POD Control Engine Section */}
+                <Card className="shadow-none border-slate-200 bg-white mb-5">
+                  <CardHeader className="p-3.5 border-b border-slate-200 flex flex-row items-center justify-between space-y-0">
+                    <div className="flex items-center space-x-2">
+                      <PackageCheck className="h-4 w-4 text-royal" />
+                      <CardTitle className="text-xs font-bold text-slate-900 uppercase tracking-wide">
+                        POD Control & Verification
+                      </CardTitle>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className={`font-mono text-[10px] font-bold uppercase ${
+                        podDetail?.currentStatus === "SOFT_COPY_CHECKED"
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                          : podDetail?.currentStatus === "ON_HOLD"
+                          ? "bg-red-50 text-red-700 border-red-300"
+                          : podDetail?.currentStatus === "LOST"
+                          ? "bg-red-100 text-red-800 border-red-400"
+                          : podDetail?.currentStatus === "ORIGINAL_RECEIVED" || podDetail?.currentStatus === "ACKNOWLEDGED"
+                          ? "bg-teal-50 text-teal-700 border-teal-300"
+                          : "bg-blue-50 text-blue-700 border-blue-300"
+                      }`}
+                    >
+                      {podDetail?.currentStatus ?? "PENDING_DELIVERY"}
+                    </Badge>
+                  </CardHeader>
+
+                  <CardContent className="p-3.5 space-y-3">
+                    {/* On-Hold Alert Banner */}
+                    {podDetail?.currentStatus === "ON_HOLD" && (
+                      <div className="rounded-lg border border-red-300 bg-red-50 p-3 flex items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-red-900">
+                            <AlertTriangle className="h-4 w-4 text-red-600" /> ON HOLD: {podDetail.holdReason}
+                          </div>
+                          <p className="mt-1 text-[11px] text-red-700">{podDetail.holdRemarks ?? "Discrepancy detected during verification"}</p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => setIsReleaseHoldModalOpen(true)}
+                          className="bg-red-700 text-white hover:bg-red-800 text-xs font-semibold h-7"
+                        >
+                          Release Hold
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* 5-Point Mandatory Verification Checklist */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                          Mandatory 5-Point POD Checklist
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono">Governs Billing Clearance</span>
+                      </div>
+
+                      {fivePointChecklist.map((item, idx) => (
+                        <div key={item.checkType} className="rounded-lg border border-slate-200 bg-slate-50/50 p-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-slate-800">{item.label}</span>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setFivePointChecklist((prev) =>
+                                  prev.map((c, i) => (i === idx ? { ...c, passed: !c.passed } : c))
+                                );
+                              }}
+                              className={`h-6 text-[10px] px-2 font-bold ${
+                                item.passed
+                                  ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                                  : "bg-red-50 text-red-700 border-red-300"
+                              }`}
+                            >
+                              {item.passed ? <CheckCircle2 className="h-3 w-3 mr-1" /> : <XCircle className="h-3 w-3 mr-1" />}
+                              {item.passed ? "PASSED" : "FAILED"}
+                            </Button>
+                          </div>
+                          <input
+                            type="text"
+                            placeholder="Add remarks / variance details (optional)"
+                            value={item.remarks}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setFivePointChecklist((prev) =>
+                                prev.map((c, i) => (i === idx ? { ...c, remarks: val } : c))
+                              );
+                            }}
+                            className="mt-1.5 w-full rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 placeholder:text-slate-400"
+                          />
+                        </div>
+                      ))}
+
+                      <div className="flex items-center gap-2 pt-2">
+                        <Button
+                          type="button"
+                          disabled={!podDetail || actionLoading}
+                          onClick={handleSubmit5PointChecklist}
+                          className="flex-1 bg-slate-900 text-white hover:bg-slate-800 text-xs font-bold h-8"
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-400" />
+                          Submit Checklist Verification
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={!podDetail || actionLoading}
+                          onClick={() => setIsHoldModalOpen(true)}
+                          className="border-red-300 text-red-700 hover:bg-red-50 text-xs font-bold h-8"
+                        >
+                          <AlertTriangle className="h-3.5 w-3.5 mr-1" />
+                          Place on Hold
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Physical Original Tracking Sub-section */}
+                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2 mt-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                          Original Paper POD Courier & Logistics
+                        </span>
+                        {podDetail?.events && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setIsEventsModalOpen(true)}
+                            className="h-6 text-[10px] text-slate-600 hover:text-slate-900"
+                          >
+                            <History className="h-3 w-3 mr-1" /> Audit Trail ({podDetail.events.length})
+                          </Button>
+                        )}
+                      </div>
+
+                      {podDetail?.courierName && (
+                        <div className="rounded bg-slate-50 p-2 text-xs font-mono text-slate-700 space-y-0.5 border border-slate-200">
+                          <div>Courier Service: <strong>{podDetail.courierName}</strong></div>
+                          <div>AWB Tracking No: <strong>{podDetail.courierTrackingNo ?? "—"}</strong></div>
+                          {podDetail.courierDispatchedAt && <div>Dispatched: {formatDate(podDetail.courierDispatchedAt as any)}</div>}
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {podDetail?.currentStatus === "SOFT_COPY_CHECKED" && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => setIsCourierModalOpen(true)}
+                            className="bg-blue-600 text-white hover:bg-blue-700 text-xs h-7"
+                          >
+                            <Send className="h-3 w-3 mr-1" /> Dispatch Courier
+                          </Button>
+                        )}
+                        {podDetail?.currentStatus === "ORIGINAL_DISPATCHED" && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={handleMarkReceived}
+                            disabled={actionLoading}
+                            className="bg-emerald-600 text-white hover:bg-emerald-700 text-xs h-7"
+                          >
+                            <Inbox className="h-3 w-3 mr-1" /> Confirm Office Receipt
+                          </Button>
+                        )}
+                        {podDetail?.currentStatus === "ORIGINAL_RECEIVED" && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={handleSubmitToClient}
+                            disabled={actionLoading}
+                            className="bg-purple-600 text-white hover:bg-purple-700 text-xs h-7"
+                          >
+                            <Send className="h-3 w-3 mr-1" /> Submit to Client
+                          </Button>
+                        )}
+                        {podDetail?.currentStatus === "SUBMITTED_TO_CLIENT" && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={handleAcknowledge}
+                            disabled={actionLoading}
+                            className="bg-emerald-700 text-white hover:bg-emerald-800 text-xs h-7"
+                          >
+                            <CheckCircle2 className="h-3 w-3 mr-1" /> Record Client Acknowledged
+                          </Button>
+                        )}
+                        {podDetail && podDetail.currentStatus !== "LOST" && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsLostModalOpen(true)}
+                            className="border-red-300 text-red-600 hover:bg-red-50 text-xs h-7"
+                          >
+                            <FileWarning className="h-3 w-3 mr-1" /> Mark Lost
+                          </Button>
+                        )}
+                        {podDetail?.currentStatus === "LOST" && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => setIsDuplicateModalOpen(true)}
+                            className="bg-amber-600 text-white hover:bg-amber-700 text-xs h-7"
+                          >
+                            <HelpCircle className="h-3 w-3 mr-1" /> Request Duplicate POD
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
                 {/* 3. Validation Checklist */}
                 <Card className="shadow-none border-slate-200 bg-white mb-5">
                   <CardHeader className="p-3.5 border-b border-slate-200">
@@ -1567,6 +2058,322 @@ export default function InternalAuditWorkspace() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* 1. PLACE POD ON HOLD MODAL */}
+      <Dialog open={isHoldModalOpen} onOpenChange={setIsHoldModalOpen}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden border-slate-200 shadow-xl">
+          <DialogHeader className="p-5 border-b border-slate-200 bg-red-50/60">
+            <div className="flex items-center space-x-2">
+              <AlertTriangle className="h-5 w-5 text-red-600" />
+              <DialogTitle className="text-base font-semibold text-red-950">Place POD on Hold</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-red-800 mt-1">
+              Placing this POD on hold will block billing until issues are rectified.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handlePlaceOnHold}>
+            <div className="p-5 space-y-3">
+              <div>
+                <Label htmlFor="holdReason" className="text-xs font-bold text-slate-800">Hold Reason *</Label>
+                <select
+                  id="holdReason"
+                  value={holdReason}
+                  onChange={(e) => setHoldReason(e.target.value)}
+                  className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs text-slate-900"
+                >
+                  <option value="MISSING_STAMP">MISSING_STAMP - Consignee stamp absent</option>
+                  <option value="MISSING_SIGNATURE">MISSING_SIGNATURE - Receiver signature missing</option>
+                  <option value="ILLEGIBLE_COPY">ILLEGIBLE_COPY - Blurry / unreadable soft copy</option>
+                  <option value="DAMAGED_DOCUMENT">DAMAGED_DOCUMENT - Physical paper torn / mutilated</option>
+                  <option value="SHORTAGE_DISPUTE">SHORTAGE_DISPUTE - Discrepancy in delivered package count</option>
+                  <option value="OTHER">OTHER - Custom operational issue</option>
+                </select>
+              </div>
+
+              <div>
+                <Label htmlFor="holdRemarks" className="text-xs font-bold text-slate-800">Hold Remarks</Label>
+                <Textarea
+                  id="holdRemarks"
+                  rows={3}
+                  value={holdRemarks}
+                  onChange={(e) => setHoldRemarks(e.target.value)}
+                  placeholder="Provide detailed description of the deficiency..."
+                  className="mt-1 text-xs border-slate-300"
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end space-x-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setIsHoldModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={actionLoading} className="bg-red-600 hover:bg-red-700 text-white font-semibold">
+                {actionLoading ? "Submitting..." : "Confirm Place on Hold"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* 2. RELEASE POD HOLD MODAL */}
+      <Dialog open={isReleaseHoldModalOpen} onOpenChange={setIsReleaseHoldModalOpen}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden border-slate-200 shadow-xl">
+          <DialogHeader className="p-5 border-b border-slate-200 bg-emerald-50/60">
+            <div className="flex items-center space-x-2">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+              <DialogTitle className="text-base font-semibold text-emerald-950">Release POD Hold</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-emerald-800 mt-1">
+              Restores POD to SOFT_COPY_RECEIVED and enables re-verification.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleReleaseHold}>
+            <div className="p-5 space-y-3">
+              <div>
+                <Label htmlFor="releaseRemarks" className="text-xs font-bold text-slate-800">Resolution Remarks *</Label>
+                <Textarea
+                  id="releaseRemarks"
+                  rows={3}
+                  value={releaseRemarks}
+                  onChange={(e) => setReleaseRemarks(e.target.value)}
+                  placeholder="Explain how the deficiency was resolved..."
+                  className="mt-1 text-xs border-slate-300"
+                  required
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end space-x-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setIsReleaseHoldModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={actionLoading} className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">
+                {actionLoading ? "Submitting..." : "Confirm Release Hold"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* 3. DISPATCH COURIER MODAL */}
+      <Dialog open={isCourierModalOpen} onOpenChange={setIsCourierModalOpen}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden border-slate-200 shadow-xl">
+          <DialogHeader className="p-5 border-b border-slate-200 bg-blue-50/60">
+            <div className="flex items-center space-x-2">
+              <Send className="h-5 w-5 text-blue-600" />
+              <DialogTitle className="text-base font-semibold text-blue-950">Dispatch Physical POD via Courier</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-blue-800 mt-1">
+              Enter transit details for the physical paper POD.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleDispatchCourier}>
+            <div className="p-5 space-y-3">
+              <div>
+                <Label htmlFor="courierName" className="text-xs font-bold text-slate-800">Courier Service Name *</Label>
+                <Input
+                  id="courierName"
+                  value={courierName}
+                  onChange={(e) => setCourierName(e.target.value)}
+                  placeholder="e.g. BlueDart, DTDC, Trackon"
+                  className="mt-1 text-xs border-slate-300"
+                  required
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="courierTrackingNo" className="text-xs font-bold text-slate-800">AWB / Tracking Number *</Label>
+                <Input
+                  id="courierTrackingNo"
+                  value={courierTrackingNo}
+                  onChange={(e) => setCourierTrackingNo(e.target.value)}
+                  placeholder="e.g. BD-89342719"
+                  className="mt-1 text-xs border-slate-300"
+                  required
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="courierDispatchedAt" className="text-xs font-bold text-slate-800">Dispatch Date (optional)</Label>
+                <Input
+                  id="courierDispatchedAt"
+                  type="date"
+                  value={courierDispatchedAt}
+                  onChange={(e) => setCourierDispatchedAt(e.target.value)}
+                  className="mt-1 text-xs border-slate-300"
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end space-x-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setIsCourierModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={actionLoading} className="bg-blue-600 hover:bg-blue-700 text-white font-semibold">
+                {actionLoading ? "Submitting..." : "Confirm Courier Dispatch"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* 4. MARK LOST MODAL */}
+      <Dialog open={isLostModalOpen} onOpenChange={setIsLostModalOpen}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden border-slate-200 shadow-xl">
+          <DialogHeader className="p-5 border-b border-slate-200 bg-red-50/60">
+            <div className="flex items-center space-x-2">
+              <FileWarning className="h-5 w-5 text-red-600" />
+              <DialogTitle className="text-base font-semibold text-red-950">Report Physical POD Lost</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-red-800 mt-1">
+              Mark original POD document as lost in transit.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleMarkLost}>
+            <div className="p-5 space-y-3">
+              <div>
+                <Label htmlFor="lostDate" className="text-xs font-bold text-slate-800">Loss Date</Label>
+                <Input
+                  id="lostDate"
+                  type="date"
+                  value={lostDate}
+                  onChange={(e) => setLostDate(e.target.value)}
+                  className="mt-1 text-xs border-slate-300"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="reportedBy" className="text-xs font-bold text-slate-800">Reported By</Label>
+                <Input
+                  id="reportedBy"
+                  value={reportedBy}
+                  onChange={(e) => setReportedBy(e.target.value)}
+                  placeholder="e.g. Courier Desk / Logistics Coordinator"
+                  className="mt-1 text-xs border-slate-300"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="incidentSummary" className="text-xs font-bold text-slate-800">Incident Summary *</Label>
+                <Textarea
+                  id="incidentSummary"
+                  rows={3}
+                  value={incidentSummary}
+                  onChange={(e) => setIncidentSummary(e.target.value)}
+                  placeholder="Explain how loss occurred (e.g. Courier vehicle accident / misplaced in transit hub)..."
+                  className="mt-1 text-xs border-slate-300"
+                  required
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end space-x-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setIsLostModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={actionLoading} className="bg-red-600 hover:bg-red-700 text-white font-semibold">
+                {actionLoading ? "Submitting..." : "Confirm Report Lost"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* 5. REQUEST DUPLICATE MODAL */}
+      <Dialog open={isDuplicateModalOpen} onOpenChange={setIsDuplicateModalOpen}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden border-slate-200 shadow-xl">
+          <DialogHeader className="p-5 border-b border-slate-200 bg-amber-50/60">
+            <div className="flex items-center space-x-2">
+              <HelpCircle className="h-5 w-5 text-amber-600" />
+              <DialogTitle className="text-base font-semibold text-amber-950">Request Duplicate POD</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-amber-800 mt-1">
+              Initiate customer request for certified duplicate proof of delivery.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleRequestDuplicate}>
+            <div className="p-5 space-y-3">
+              <div>
+                <Label htmlFor="requestReason" className="text-xs font-bold text-slate-800">Request Reason *</Label>
+                <Input
+                  id="requestReason"
+                  value={requestReason}
+                  onChange={(e) => setRequestReason(e.target.value)}
+                  placeholder="e.g. Lost in courier transit"
+                  className="mt-1 text-xs border-slate-300"
+                  required
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="duplicateRemarks" className="text-xs font-bold text-slate-800">Customer Communication Remarks</Label>
+                <Textarea
+                  id="duplicateRemarks"
+                  rows={3}
+                  value={duplicateRemarks}
+                  onChange={(e) => setDuplicateRemarks(e.target.value)}
+                  placeholder="Notes sent to customer receiving desk..."
+                  className="mt-1 text-xs border-slate-300"
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end space-x-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setIsDuplicateModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={actionLoading} className="bg-amber-600 hover:bg-amber-700 text-white font-semibold">
+                {actionLoading ? "Submitting..." : "Submit Duplicate Request"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* 6. POD AUDIT TRAIL MODAL */}
+      <Dialog open={isEventsModalOpen} onOpenChange={setIsEventsModalOpen}>
+        <DialogContent className="sm:max-w-lg p-0 overflow-hidden border-slate-200 shadow-xl">
+          <DialogHeader className="p-5 border-b border-slate-200 bg-slate-50">
+            <div className="flex items-center space-x-2">
+              <History className="h-5 w-5 text-slate-700" />
+              <DialogTitle className="text-base font-semibold text-slate-900">POD Lifecycle Audit Trail</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-slate-500 mt-1">
+              Append-only tamper-evident event log for POD {podDetail?.id}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="p-5 max-h-96 overflow-y-auto space-y-3">
+            {podDetail?.events && podDetail.events.length > 0 ? (
+              podDetail.events.map((ev, i) => (
+                <div key={ev.id || i} className="p-2.5 rounded border border-slate-200 bg-slate-50/70 text-xs space-y-1">
+                  <div className="flex items-center justify-between font-mono">
+                    <span className="font-bold text-slate-900">{ev.eventType}</span>
+                    <span className="text-slate-500 text-[10px]">{formatDate(ev.createdAt as any)}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-600">
+                    Transition: <span className="font-mono text-slate-800">{ev.fromStatus ?? "INITIAL"} → {ev.toStatus}</span>
+                  </div>
+                  {ev.notes && <div className="text-[11px] text-slate-700 italic">&ldquo;{ev.notes}&rdquo;</div>}
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-slate-500 text-center py-6">No event records found.</p>
+            )}
+          </div>
+
+          <DialogFooter className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end">
+            <Button type="button" variant="outline" size="sm" onClick={() => setIsEventsModalOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
